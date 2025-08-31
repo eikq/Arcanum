@@ -26,36 +26,9 @@ export class SoundManager {
   private isInitialized = false;
   private audioContext: AudioContext | null = null; // NEW: add audioContext
   private isMuted = false;
-  private initializationAttempted = false;
 
   // Sound data URIs - minimal demo sounds
-  private soundData: Record<string, string> = {
-    // Base UI sounds
-    ui_click: this.generateTone(800, 0.1),
-    ui_hover: this.generateTone(600, 0.05),
-    ui_error: this.generateTone(200, 0.3),
-    
-    // Cast sounds
-    cast_whoosh: this.generateSweep(400, 800, 0.4),
-    cast_chime: this.generateTone(1200, 0.2),
-    
-    // Element layers
-    fire_crackle: this.generateNoise(0.3),
-    ice_chime: this.generateTone(1800, 0.3),
-    lightning_zap: this.generateSweep(100, 2000, 0.2),
-    nature_rustle: this.generateNoise(0.4),
-    shadow_whisper: this.generateSweep(80, 300, 0.5),
-    light_gleam: this.generateTone(2000, 0.3),
-    arcane_hum: this.generateTone(440, 0.5),
-    water_splash: this.generateNoise(0.25),
-    wind_gust: this.generateSweep(200, 600, 0.6),
-    earth_rumble: this.generateTone(100, 0.7),
-    
-    // Impact sounds
-    impact_boom: this.generateTone(60, 0.4),
-    impact_crack: this.generateNoise(0.2),
-    impact_splash: this.generateSweep(300, 100, 0.3),
-  };
+  private soundData: Record<string, string> = {};
 
   private elementalSounds: Record<SpellElement, ElementalSounds> = {
     fire: {
@@ -102,12 +75,8 @@ export class SoundManager {
 
   async init(): Promise<void> {
     console.log('🎵 SoundManager.init() called');
-    console.log('🎵 isInitialized:', this.isInitialized);
-    console.log('🎵 initializationAttempted:', this.initializationAttempted);
     
     if (this.isInitialized) return;
-    
-    this.initializationAttempted = true;
 
     try {
       // Initialize AudioContext for procedural sounds
@@ -126,9 +95,44 @@ export class SoundManager {
         }
       }
       
+      // Generate all sound data URIs now that AudioContext is ready
+      console.log('🎵 Generating procedural sounds...');
+      this.soundData = {
+        // Base UI sounds
+        ui_click: this.generateTone(800, 0.1),
+        ui_hover: this.generateTone(600, 0.05),
+        ui_error: this.generateTone(200, 0.3),
+        
+        // Cast sounds
+        cast_whoosh: this.generateSweep(400, 800, 0.4),
+        cast_chime: this.generateTone(1200, 0.2),
+        
+        // Element layers
+        fire_crackle: this.generateNoise(0.3),
+        ice_chime: this.generateTone(1800, 0.3),
+        lightning_zap: this.generateSweep(100, 2000, 0.2),
+        nature_rustle: this.generateNoise(0.4),
+        shadow_whisper: this.generateSweep(80, 300, 0.5),
+        light_gleam: this.generateTone(2000, 0.3),
+        arcane_hum: this.generateTone(440, 0.5),
+        water_splash: this.generateNoise(0.25),
+        wind_gust: this.generateSweep(200, 600, 0.6),
+        earth_rumble: this.generateTone(100, 0.7),
+        
+        // Impact sounds
+        impact_boom: this.generateTone(60, 0.4),
+        impact_crack: this.generateNoise(0.2),
+        impact_splash: this.generateSweep(300, 100, 0.3),
+      };
+      console.log('🎵 Generated', Object.keys(this.soundData).length, 'procedural sounds');
+      
       // Load all sound effects
       console.log('🎵 Loading sound effects...');
       for (const [id, dataUri] of Object.entries(this.soundData)) {
+        if (!dataUri) {
+          console.warn('⚠️ Empty data URI for sound:', id);
+          continue;
+        }
         console.log(`🎵 Loading sound: ${id}`);
         const howl = new Howl({
           src: [dataUri],
@@ -143,12 +147,16 @@ export class SoundManager {
       // Load music tracks (simple tones for demo)
       console.log('🎵 Loading music tracks...');
       const musicData = {
-        menu_ambient: this.generateAmbient(220, 60), // 1 minute ambient
-        match_intense: this.generateAmbient(440, 120), // 2 minute battle music
-        victory: this.generateAmbient(660, 30), // 30 second victory
+        menu_ambient: this.generateAmbient(220, 10), // 10 second ambient (shorter for demo)
+        battle_theme: this.generateAmbient(440, 15), // 15 second battle music
+        victory: this.generateAmbient(660, 8), // 8 second victory
       };
 
       for (const [id, dataUri] of Object.entries(musicData)) {
+        if (!dataUri) {
+          console.warn('⚠️ Empty data URI for music:', id);
+          continue;
+        }
         console.log(`🎵 Loading music: ${id}`);
         const howl = new Howl({
           src: [dataUri],
@@ -196,27 +204,30 @@ export class SoundManager {
   // NEW: Enhanced API for AutoCaster integration
   playUI(id: "click" | "back" | "error"): void {
     console.log(`🎵 playUI called: ${id}`);
-    console.log('🎵 isInitialized:', this.isInitialized, 'isMuted:', this.isMuted);
     
-    if (!this.isInitialized || this.isMuted) return;
+    if (!this.isInitialized || this.isMuted) {
+      console.log('🎵 Skipping playUI - not initialized or muted');
+      return;
+    }
 
     const soundId = `ui_${id}`;
     const sound = this.sounds.get(soundId);
-    console.log(`🎵 Found sound for ${soundId}:`, !!sound);
     
     if (sound) {
-      const volume = this.sfxVolume * this.masterVolume * 0.8; // Increased volume
+      const volume = this.sfxVolume * this.masterVolume * 1.2; // Further increased volume
       console.log(`🎵 Playing ${soundId} at volume:`, volume);
       sound.volume(volume);
-      sound.play();
+      const playId = sound.play();
+      console.log(`🎵 Play ID for ${soundId}:`, playId);
     } else {
       console.warn(`⚠️ Sound not found: ${soundId}`);
+      // Fallback to procedural sound
+      this.playProceduralSound(id === 'click' ? 800 : id === 'error' ? 200 : 600, 0.1);
     }
   }
 
   play(kind: "cast" | "impact", element?: ElementKey, opts?: { gain?: number; pitch?: number }): void {
     console.log(`🎵 play called: ${kind}, element: ${element}`);
-    console.log('🎵 isInitialized:', this.isInitialized, 'isMuted:', this.isMuted);
     
     if (!this.isInitialized || this.isMuted) return;
     
@@ -240,7 +251,6 @@ export class SoundManager {
   music = {
     start: (id: "battle_theme" | "menu_ambient" | "victory") => {
       console.log(`🎵 music.start called: ${id}`);
-      console.log('🎵 isInitialized:', this.isInitialized, 'isMuted:', this.isMuted);
       
       if (!this.isInitialized || this.isMuted) return;
       this.playMusic(id);
@@ -316,6 +326,30 @@ export class SoundManager {
     o2.stop(t + (type === 'cast' ? 0.5 : 0.3));
   }
 
+  // NEW: Procedural sound fallback for when Howler fails
+  private playProceduralSound(frequency: number, duration: number): void {
+    if (!this.audioContext) return;
+    
+    console.log(`🎵 Playing procedural sound: ${frequency}Hz, ${duration}s`);
+    
+    const t = this.audioContext.currentTime;
+    const osc = this.audioContext.createOscillator();
+    const gain = this.audioContext.createGain();
+    
+    osc.frequency.value = frequency;
+    osc.type = 'sine';
+    
+    gain.gain.setValueAtTime(0, t);
+    gain.gain.exponentialRampToValueAtTime(0.1 * this.masterVolume, t + 0.01);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + duration);
+    
+    osc.connect(gain);
+    gain.connect(this.audioContext.destination);
+    
+    osc.start(t);
+    osc.stop(t + duration);
+  }
+
   // Cast sound with elemental layers
   playCast(element: SpellElement, loudness: number = 0.8, config: SoundConfig = {}): void {
     console.log(`🎵 playCast called: element=${element}, loudness=${loudness}`);
@@ -334,14 +368,13 @@ export class SoundManager {
       return;
     }
 
-    console.log(`🎵 Playing ${elementSounds.cast.length} cast sounds for ${element}`);
     
     // Play cast sounds with loudness-based volume and pitch variation
     elementSounds.cast.forEach((soundId, index) => {
       const sound = this.sounds.get(soundId);
       if (sound) {
         // Logarithmic volume curve for loudness
-        const volume = Math.pow(loudness, 0.5) * this.sfxVolume * this.masterVolume * 1.5; // Increased volume
+        const volume = Math.pow(loudness, 0.5) * this.sfxVolume * this.masterVolume * 2.0; // Further increased volume
         
         // Small pitch variation (±3%)
         const pitchVariation = 0.97 + Math.random() * 0.06;
@@ -349,16 +382,17 @@ export class SoundManager {
         // Slight delay for layering
         const delay = index * 50;
 
-        console.log(`🎵 Scheduling ${soundId} with volume ${volume} in ${delay}ms`);
         
         setTimeout(() => {
           sound.volume(volume * (config.volume || 1));
           sound.rate(pitchVariation * (config.pitch || 1));
-          console.log(`🎵 Playing ${soundId} now`);
+          console.log(`🎵 Playing ${soundId} at volume ${volume}`);
           sound.play();
         }, delay);
       } else {
         console.warn(`⚠️ Sound not found: ${soundId}`);
+        // Fallback to procedural sound
+        this.playElementSound(element, 'cast', loudness);
       }
     });
   }
@@ -407,15 +441,12 @@ export class SoundManager {
     const track = this.musicTracks.get(trackId);
     if (!track) {
       console.warn(`⚠️ Music track not found: ${trackId}`);
-      console.log('🎵 Available tracks:', Array.from(this.musicTracks.keys()));
       return;
     }
 
-    console.log(`🎵 Found track ${trackId}, starting playback`);
     
     // Stop current music
     if (this.currentMusic) {
-      console.log('🎵 Stopping current music');
       this.currentMusic.fade(this.currentMusic.volume(), 0, fadeIn / 2);
       setTimeout(() => {
         if (this.currentMusic) {
@@ -425,7 +456,7 @@ export class SoundManager {
     }
 
     // Start new music
-    const finalVolume = this.musicVolume * this.masterVolume;
+    const finalVolume = this.musicVolume * this.masterVolume * 1.5; // Increased music volume
     console.log(`🎵 Starting ${trackId} with volume ${finalVolume}`);
     track.volume(0);
     track.play();
@@ -482,6 +513,8 @@ export class SoundManager {
 
   // Generate demo audio (data URIs)
   private generateTone(frequency: number, duration: number): string {
+    console.log(`🎵 Generating tone: ${frequency}Hz, ${duration}s`);
+    
     const sampleRate = 22050;
     const samples = Math.floor(sampleRate * duration);
     const buffer = new ArrayBuffer(44 + samples * 2);
@@ -511,10 +544,14 @@ export class SoundManager {
     }
 
     const blob = new Blob([buffer], { type: 'audio/wav' });
-    return URL.createObjectURL(blob);
+    const url = URL.createObjectURL(blob);
+    console.log(`🎵 Generated tone URL: ${url.substring(0, 50)}...`);
+    return url;
   }
 
   private generateSweep(startFreq: number, endFreq: number, duration: number): string {
+    console.log(`🎵 Generating sweep: ${startFreq}-${endFreq}Hz, ${duration}s`);
+    
     const sampleRate = 22050;
     const samples = Math.floor(sampleRate * duration);
     const buffer = new ArrayBuffer(44 + samples * 2);
@@ -546,10 +583,14 @@ export class SoundManager {
     }
 
     const blob = new Blob([buffer], { type: 'audio/wav' });
-    return URL.createObjectURL(blob);
+    const url = URL.createObjectURL(blob);
+    console.log(`🎵 Generated sweep URL: ${url.substring(0, 50)}...`);
+    return url;
   }
 
   private generateNoise(duration: number): string {
+    console.log(`🎵 Generating noise: ${duration}s`);
+    
     const sampleRate = 22050;
     const samples = Math.floor(sampleRate * duration);
     const buffer = new ArrayBuffer(44 + samples * 2);
@@ -580,10 +621,14 @@ export class SoundManager {
     }
 
     const blob = new Blob([buffer], { type: 'audio/wav' });
-    return URL.createObjectURL(blob);
+    const url = URL.createObjectURL(blob);
+    console.log(`🎵 Generated noise URL: ${url.substring(0, 50)}...`);
+    return url;
   }
 
   private generateAmbient(baseFreq: number, duration: number): string {
+    console.log(`🎵 Generating ambient: ${baseFreq}Hz, ${duration}s`);
+    
     const sampleRate = 22050;
     const samples = Math.floor(sampleRate * duration);
     const buffer = new ArrayBuffer(44 + samples * 2);
@@ -621,7 +666,9 @@ export class SoundManager {
     }
 
     const blob = new Blob([buffer], { type: 'audio/wav' });
-    return URL.createObjectURL(blob);
+    const url = URL.createObjectURL(blob);
+    console.log(`🎵 Generated ambient URL: ${url.substring(0, 50)}...`);
+    return url;
   }
 
   private writeString(view: DataView, offset: number, string: string): void {

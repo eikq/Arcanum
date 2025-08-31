@@ -296,7 +296,12 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
     }
     
     // Start battle music
-    soundManager.music.start('battle_theme');
+    try {
+      console.log('🎵 Starting battle music...');
+      soundManager.music.start('battle_theme');
+    } catch (error) {
+      console.error('❌ Failed to start battle music:', error);
+    }
     
     // Start match timer
   }, [mode, voiceRecognition]);
@@ -356,6 +361,14 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
       player1: { element: spell.element, timestamp: Date.now() }
     }));
     
+    // Play cast sound
+    try {
+      console.log(`🎵 Playing cast sound for ${spell.element}...`);
+      soundManager.play('cast', spell.element, { gain: payload.power });
+    } catch (error) {
+      console.error('❌ Failed to play cast sound:', error);
+    }
+    
     // Clear casting animation after 600ms
     setTimeout(() => {
       setActiveCasts(prev => ({ ...prev, player1: undefined }));
@@ -373,7 +386,12 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
           power: payload.power,
           onComplete: () => {
             setActiveProjectiles(prev => prev.filter(p => p.id !== projectileId));
-            soundManager.play('impact', spell.element);
+            try {
+              console.log(`🎵 Playing impact sound for ${spell.element}...`);
+              soundManager.play('impact', spell.element);
+            } catch (error) {
+              console.error('❌ Failed to play impact sound:', error);
+            }
           }
         }]);
       }, 400);
@@ -458,7 +476,12 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
           power: castData.power,
           onComplete: () => {
             setActiveProjectiles(prev => prev.filter(p => p.id !== projectileId));
-            soundManager.play('impact', spell.element);
+            try {
+              console.log(`🎵 Playing opponent impact sound for ${spell.element}...`);
+              soundManager.play('impact', spell.element);
+            } catch (error) {
+              console.error('❌ Failed to play opponent impact sound:', error);
+            }
           }
         }]);
       }, 400);
@@ -494,9 +517,14 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
             // Show end modal
             setShowEndModal(true);
             
-            soundManager.stopMusic();
-            if (!isPlayerDefeated) {
-              soundManager.music.start('victory');
+            try {
+              soundManager.stopMusic();
+              if (!isPlayerDefeated) {
+                console.log('🎵 Playing victory music...');
+                soundManager.music.start('victory');
+              }
+            } catch (error) {
+              console.error('❌ Failed to play end game music:', error);
             }
           }, 500);
         }
@@ -571,6 +599,17 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
     
     // Reset voice recognition state completely
     voiceRecognition.resetTranscript();
+    
+    // Stop any playing music and restart battle theme
+    try {
+      soundManager.stopMusic();
+      setTimeout(() => {
+        console.log('🎵 Restarting battle music after play again...');
+        soundManager.music.start('battle_theme');
+      }, 1000);
+    } catch (error) {
+      console.error('❌ Failed to restart music:', error);
+    }
     
     console.log('✅ Match state reset complete');
     startCountdown();
