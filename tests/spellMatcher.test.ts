@@ -41,4 +41,10 @@ describe('calculateSpellPower', () => {
     
     expect(power1).toBeGreaterThan(power2);
   });
+
+  it('should ensure minimum power for always-cast', () => {
+    const power = calculateSpellPower(0.1, 0.01, 0.05, false);
+    
+    expect(power).toBeGreaterThanOrEqual(0.05);
+  });
 });
