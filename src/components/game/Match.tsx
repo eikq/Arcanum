@@ -709,8 +709,9 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
                 
                 {final && (
                   <div className="text-sm text-nature font-medium">
-                <div className="flex items-center gap-4">
-                    ✓ {final}
+                    <div className="flex items-center gap-4">
+                      ✓ {final}
+                    </div>
                   </div>
                 )}
                 
@@ -740,7 +741,6 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
                   {isListening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
                   {isListening ? 'Stop' : 'Start'}
                 </Button>
-                </div>
               </div>
             </div>
             
