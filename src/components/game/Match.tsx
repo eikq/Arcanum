@@ -141,6 +141,7 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
     }
   );
 
+  const { isListening, hasPermission, interim, final } = voiceRecognition;
 
   // Casting visuals
   const [activeCasts, setActiveCasts] = useState<{
@@ -165,7 +166,7 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
   // Handle mic toggle with proper async handling
   const handleMicToggle = useCallback(async () => {
     try {
-      if (voiceRecognition.isListening) {
+      if (isListening) {
         voiceRecognition.stop();
         toast({
           title: "Microphone Stopped",
@@ -186,7 +187,7 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
         variant: "destructive",
       });
     }
-  }, [voiceRecognition]);
+  }, [isListening, voiceRecognition]);
 
   // Initialize systems
   useEffect(() => {
@@ -537,7 +538,8 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
       return newPaused;
     });
   }, [gameState, voiceRecognition, handleOpponentCast]);
-  
+
+  // End match handlers
   const handlePlayAgain = useCallback(() => {
     console.log('🔄 Starting match restart...');
     
@@ -573,7 +575,7 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
     
     console.log('✅ Match state reset complete');
     startCountdown();
-  }, [mode, startCountdown]);
+  }, [mode, startCountdown, voiceRecognition]);
 
   const handleNextBot = useCallback(() => {
     const difficulties: Array<'easy' | 'medium' | 'hard'> = ['easy', 'medium', 'hard'];
@@ -721,7 +723,7 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
       {/* Bottom HUD - Mic Interface */}
       <div className="fixed bottom-4 left-4 right-4 z-20">
         <div className="max-w-6xl mx-auto">
-          <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
             {/* Mic Gauge */}
             <div className="flex justify-center lg:justify-start">
               <CooldownRing
@@ -734,7 +736,7 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
                   dbfs={audioMeterRef.current?.getDbfs() || -60}
                   normalizedRms={audioMeterRef.current?.normalizedRms(audioMeterRef.current?.getRms() || 0) || 0}
                   calibration={audioMeterRef.current?.getCalibration()}
-                  muted={!voiceRecognition.isListening}
+                  muted={!isListening}
                 />
               </CooldownRing>
             </div>
@@ -743,25 +745,25 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
             <div className="bg-card/80 backdrop-blur border rounded-lg p-4">
               <div className="space-y-2">
                 <div className="text-sm font-medium">
-                  {!voiceRecognition.hasPermission ? (
+                  {!hasPermission ? (
                     <span className="text-destructive">Microphone access required</span>
-                  ) : voiceRecognition.isListening ? (
+                  ) : isListening ? (
                     <span className="text-nature">Listening...</span>
                   ) : (
                     <span className="text-muted-foreground">Microphone ready</span>
                   )}
                 </div>
                 
-                {voiceRecognition.interim && (
+                {interim && (
                   <div className="text-sm text-muted-foreground italic">
-                    {voiceRecognition.interim}
+                    {interim}
                   </div>
                 )}
                 
-                {voiceRecognition.final && (
+                {final && (
                   <div className="text-sm text-nature font-medium">
                     <div className="flex items-center gap-4">
-                      ✓ {voiceRecognition.final}
+                      ✓ {final}
                     </div>
                   </div>
                 )}
@@ -784,10 +786,10 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
                   onMouseDown={(e) => e.preventDefault()}
                   onTouchStart={(e) => e.preventDefault()}
                   className="gap-2"
-                  disabled={!voiceRecognition.hasPermission}
+                  disabled={!hasPermission}
                 >
-                  {voiceRecognition.isListening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
-                  {voiceRecognition.isListening ? 'Stop' : 'Start'}
+                  {isListening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+                  {isListening ? 'Stop' : 'Start'}
                 </Button>
               </div>
             </div>
