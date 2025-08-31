@@ -44,8 +44,6 @@ class MicBootstrapManager {
     };
 
     this.setupAudioGraph();
-    this.setupGestureBootstrap();
-    this.setupDeviceChangeListener();
   }
 
   private setupAudioGraph(): void {
@@ -63,61 +61,6 @@ class MicBootstrapManager {
     analyser.smoothingTimeConstant = 0.8;
   }
 
-  private setupGestureBootstrap(): void {
-    if (this.gestureListenersAdded) return;
-
-    const resumeAudio = async () => {
-      if (this.state.context.state === 'suspended') {
-        try {
-          await this.state.context.resume();
-          console.log('AudioContext resumed via user gesture');
-        } catch (error) {
-          console.warn('Failed to resume AudioContext:', error);
-        }
-      }
-    };
-
-    const handleGesture = () => {
-      resumeAudio();
-      // Keep listeners active for subsequent gestures
-    };
-
-    document.addEventListener('pointerdown', handleGesture);
-    document.addEventListener('keydown', handleGesture);
-    document.addEventListener('touchstart', handleGesture);
-    
-    document.addEventListener('visibilitychange', () => {
-      if (!document.hidden) resumeAudio();
-    });
-
-    this.gestureListenersAdded = true;
-  }
-
-  private setupDeviceChangeListener(): void {
-    if (!navigator.mediaDevices?.addEventListener) return;
-
-    const handleDeviceChange = async () => {
-      if (this.state.ready === "ready" && this.state.deviceId) {
-        try {
-          const devices = await navigator.mediaDevices.enumerateDevices();
-          const currentDevice = devices.find(d => d.deviceId === this.state.deviceId);
-          
-          if (!currentDevice) {
-            console.log('Current mic device disappeared, reacquiring...');
-            await this.reacquireMic("device disappeared");
-          }
-        } catch (error) {
-          console.warn('Device change check failed:', error);
-        }
-      }
-    };
-
-    navigator.mediaDevices.addEventListener('devicechange', handleDeviceChange);
-    this.deviceChangeUnsubscribe = () => {
-      navigator.mediaDevices.removeEventListener('devicechange', handleDeviceChange);
-    };
-  }
-
   async acquireMic(preferredDeviceId?: string): Promise<MicState> {
     this.updateState({ ready: "acquiring", error: undefined });
 
@@ -131,107 +74,53 @@ class MicBootstrapManager {
       }
     }
 
-    const profiles: Array<{ id: "A"|"B"|"C"|"D", constraints: MediaStreamConstraints }> = [
-      {
-        id: "A",
-        constraints: {
-          audio: {
-            deviceId: preferredDeviceId ? { exact: preferredDeviceId } : undefined,
-            echoCancellation: true,
-            noiseSuppression: true,
-            autoGainControl: true
-          }
+    try {
+      const constraints = {
+        audio: {
+          deviceId: preferredDeviceId ? { exact: preferredDeviceId } : undefined,
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true
         }
-      },
-      {
-        id: "B", 
-        constraints: {
-          audio: {
-            deviceId: preferredDeviceId ? { exact: preferredDeviceId } : undefined,
-            echoCancellation: true,
-            noiseSuppression: false,
-            autoGainControl: false
-          }
-        }
-      },
-      {
-        id: "C",
-        constraints: {
-          audio: {
-            deviceId: preferredDeviceId ? { exact: preferredDeviceId } : undefined,
-            echoCancellation: false,
-            noiseSuppression: false,
-            autoGainControl: false
-          }
-        }
-      },
-      {
-        id: "D",
-        constraints: { 
-          audio: preferredDeviceId ? { deviceId: preferredDeviceId } : true 
-        }
+      };
+      
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      const track = stream.getAudioTracks()[0];
+      
+      if (!track) {
+        stream.getTracks().forEach(t => t.stop());
+        throw new Error('No audio track found');
       }
-    ];
 
-    for (const profile of profiles) {
-      try {
-        console.log(`Trying mic profile ${profile.id}...`);
-        
-        const stream = await navigator.mediaDevices.getUserMedia(profile.constraints);
-        const track = stream.getAudioTracks()[0];
-        
-        if (!track) {
-          stream.getTracks().forEach(t => t.stop());
-          console.log(`Profile ${profile.id}: No audio track found`);
-          continue;
-        }
-
-        console.log(`Profile ${profile.id}: Got track with settings:`, track.getSettings());
-
-        // Connect to audio graph
-        if (this.state.source) {
-          this.state.source.disconnect();
-        }
-
-        const source = this.state.context.createMediaStreamSource(stream);
-        source.connect(this.state.compressor);
-        this.state.compressor.connect(this.state.analyser);
-
-        this.updateState({
-          stream,
-          track,
-          deviceId: track.getSettings().deviceId,
-          source,
-          profile: profile.id,
-          ready: "ready",
-          error: undefined
-        });
-
-        // Test RMS for 200ms (shorter test)
-        const rmsTestPassed = await this.testRmsLevel(200);
-        
-        if (!track.muted) {
-          console.log(`Mic profile ${profile.id} successful`);
-          this.startWatchdog();
-          this.startMeter();
-          return this.state;
-        } else {
-          console.log(`Mic profile ${profile.id}: Track is muted`);
-          stream.getTracks().forEach(t => t.stop());
-          this.updateState({ stream: undefined, track: undefined, source: undefined });
-        }
-      } catch (error) {
-        console.warn(`Mic profile ${profile.id} failed:`, error);
-        continue;
+      // Connect to audio graph
+      if (this.state.source) {
+        this.state.source.disconnect();
       }
+
+      const source = this.state.context.createMediaStreamSource(stream);
+      source.connect(this.state.compressor);
+      this.state.compressor.connect(this.state.analyser);
+
+      this.updateState({
+        stream,
+        track,
+        deviceId: track.getSettings().deviceId,
+        source,
+        ready: "ready",
+        error: undefined
+      });
+
+      console.log('Microphone acquired successfully');
+      this.startMeter();
+      return this.state;
+    } catch (error) {
+      console.error('Failed to acquire microphone:', error);
+      this.updateState({ 
+        ready: "error", 
+        error: error instanceof Error ? error.message : "Microphone access failed"
+      });
+      throw error;
     }
-
-    this.updateState({ 
-      ready: "error", 
-      error: "All mic profiles failed" 
-    });
-    
-    throw new Error("Failed to acquire microphone with any profile");
   }
 
   async reacquireMic(reason?: string): Promise<MicState> {
@@ -242,7 +131,6 @@ class MicBootstrapManager {
       this.state.stream.getTracks().forEach(track => track.stop());
     }
     
-    this.stopWatchdog();
     this.updateState({ 
       stream: undefined, 
       track: undefined, 
@@ -251,67 +139,6 @@ class MicBootstrapManager {
     });
 
     return this.acquireMic(this.state.deviceId);
-  }
-
-  private async testRmsLevel(timeoutMs: number): Promise<boolean> {
-    return new Promise((resolve) => {
-      const startTime = performance.now();
-      const dataArray = new Float32Array(this.state.analyser.fftSize);
-      
-      const checkRms = () => {
-        this.state.analyser.getFloatTimeDomainData(dataArray);
-        const rms = this.computeRms(dataArray);
-        
-        if (rms > 0.005) {
-          resolve(true);
-          return;
-        }
-        
-        if (performance.now() - startTime > timeoutMs) {
-          resolve(false);
-          return;
-        }
-        
-        setTimeout(checkRms, 50);
-      };
-      
-      checkRms();
-    });
-  }
-
-  private startWatchdog(): void {
-    this.stopWatchdog();
-    
-    this.watchdogInterval = setInterval(() => {
-      if (this.state.ready !== "ready" || !this.state.track) return;
-
-      const track = this.state.track;
-      const now = performance.now();
-      
-      // Check if track is muted
-      if (track.muted && now - this.lastRmsCheck > 1000) {
-        console.log('Watchdog: Track muted, reacquiring...');
-        this.reacquireMic("track muted");
-        return;
-      }
-
-      // Check if RMS has been silent too long
-      if (this.rmsHistory.length >= 30) { // 30 * 50ms = 1.5s
-        const avgRms = this.rmsHistory.reduce((a, b) => a + b, 0) / this.rmsHistory.length;
-        if (avgRms < 0.003) {
-          console.log('Watchdog: Silent for too long, reacquiring...');
-          this.reacquireMic("silent buffer");
-          return;
-        }
-      }
-    }, 1000);
-  }
-
-  private stopWatchdog(): void {
-    if (this.watchdogInterval) {
-      clearInterval(this.watchdogInterval);
-      this.watchdogInterval = undefined;
-    }
   }
 
   private startMeter(): void {
@@ -323,12 +150,6 @@ class MicBootstrapManager {
       this.state.analyser.getFloatTimeDomainData(dataArray);
       const rms = this.computeRms(dataArray);
       const dbfs = this.rmsToDbfs(rms);
-      
-      // Update RMS history for watchdog
-      this.rmsHistory.push(rms);
-      if (this.rmsHistory.length > 30) {
-        this.rmsHistory.shift();
-      }
       
       // Update track state
       const track = this.state.track;
@@ -371,18 +192,12 @@ class MicBootstrapManager {
   }
 
   destroy(): void {
-    this.stopWatchdog();
-    
     if (this.state.stream) {
       this.state.stream.getTracks().forEach(track => track.stop());
     }
     
     if (this.state.source) {
       this.state.source.disconnect();
-    }
-    
-    if (this.deviceChangeUnsubscribe) {
-      this.deviceChangeUnsubscribe();
     }
     
     this.subscribers.clear();

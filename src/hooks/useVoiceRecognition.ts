@@ -65,8 +65,8 @@ export const useVoiceRecognition = (
   const recognitionRef = useRef<SpeechRecognition | null>(null);
   const micStateRef = useRef<MicState | null>(null);
   const restartTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const backoffRef = useRef<number>(500);
   const micStateUnsubscribeRef = useRef<(() => void) | null>(null);
+  const isStartingRef = useRef(false);
 
   // Initialize speech recognition
   useEffect(() => {
@@ -90,55 +90,44 @@ export const useVoiceRecognition = (
       recognition.onstart = () => {
         setListening(true);
         setError(undefined);
-        backoffRef.current = 500; // Reset backoff on successful start
+        isStartingRef.current = false;
       };
 
       recognition.onend = () => {
         setListening(false);
+        isStartingRef.current = false;
         
-        // Auto-restart with capped backoff if we were supposed to be listening
-        if (hasPermission && !micDenied && micStateRef.current?.ready === "ready") {
-          const restartSR = () => {
-            if (restartTimeoutRef.current) clearTimeout(restartTimeoutRef.current);
-            restartTimeoutRef.current = setTimeout(() => {
+        // Simple auto-restart without aggressive retries
+        if (hasPermission && !micDenied && micStateRef.current?.ready === "ready" && !isStartingRef.current) {
+          if (restartTimeoutRef.current) clearTimeout(restartTimeoutRef.current);
+          restartTimeoutRef.current = setTimeout(() => {
+            if (recognitionRef.current && !listening && !isStartingRef.current) {
               try {
-                if (recognitionRef.current && micStateRef.current?.ready === "ready") {
-                  recognition.start();
-                }
+                isStartingRef.current = true;
+                recognition.start();
               } catch (error) {
                 console.warn('Failed to restart SR:', error);
-                backoffRef.current = Math.min(5000, backoffRef.current * 1.5);
-                restartSR();
+                isStartingRef.current = false;
               }
-            }, backoffRef.current);
-          };
-          restartSR();
+            }
+          }, 1000);
         }
       };
 
       recognition.onerror = (event) => {
         console.warn('Speech recognition error:', event.error);
+        isStartingRef.current = false;
         
         if (event.error === 'not-allowed') {
           setHasPermission(false);
           setListening(false);
           setMicDenied(true);
           setError('Microphone permission denied');
-        } else if (event.error === 'no-speech' || event.error === 'aborted') {
-          // This is normal, just restart
-          if (hasPermission && micStateRef.current?.ready === "ready") {
-            setTimeout(() => {
-              try {
-                if (recognitionRef.current && !listening) {
-                  recognition.start();
-                }
-              } catch (e) {
-                console.warn('Failed to restart after error:', e);
-              }
-            }, 1000);
-          }
         } else {
-          setError(`Speech recognition error: ${event.error}`);
+          // Don't show errors for normal events
+          if (event.error !== 'no-speech' && event.error !== 'aborted') {
+            setError(`Speech recognition error: ${event.error}`);
+          }
         }
       };
 
@@ -198,15 +187,6 @@ export const useVoiceRecognition = (
       micStateRef.current = micState;
       setDbfs(micState.dbfs);
       setLoudness(micState.rms);
-      
-      // Auto-start SR when mic becomes ready
-      if (micState.ready === "ready" && !listening && hasPermission && recognitionRef.current) {
-        try {
-          recognitionRef.current.start();
-        } catch (error) {
-          console.warn('Failed to auto-start SR:', error);
-        }
-      }
     });
 
     micStateUnsubscribeRef.current = unsubscribe;
@@ -251,8 +231,8 @@ export const useVoiceRecognition = (
       return;
     }
     
-    // Don't start if already listening
-    if (listening) {
+    // Don't start if already listening or starting
+    if (listening || isStartingRef.current) {
       return;
     }
     
@@ -261,9 +241,11 @@ export const useVoiceRecognition = (
     }
     
     try {
+      isStartingRef.current = true;
       recognitionRef.current.start();
       setError(undefined);
     } catch (error) {
+      isStartingRef.current = false;
       if (error instanceof Error && !error.message.includes('already started')) {
         console.error('Failed to start speech recognition:', error);
         setError(error.message);
@@ -273,6 +255,7 @@ export const useVoiceRecognition = (
 
   // Stop listening
   const stop = useCallback(() => {
+    isStartingRef.current = false;
     setListening(false);
     
     if (restartTimeoutRef.current) {
@@ -293,7 +276,7 @@ export const useVoiceRecognition = (
   // Restart with exponential backoff
   const restart = useCallback(async () => {
     stop();
-    await new Promise(resolve => setTimeout(resolve, backoffRef.current));
+    await new Promise(resolve => setTimeout(resolve, 1000));
     await start();
   }, [start, stop]);
 
