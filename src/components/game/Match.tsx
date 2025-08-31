@@ -741,25 +741,25 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
             <div className="bg-card/80 backdrop-blur border rounded-lg p-4">
               <div className="space-y-2">
                 <div className="text-sm font-medium">
-                  {!hasPermission ? (
+                  {!voiceRecognition.hasPermission ? (
                     <span className="text-destructive">Microphone access required</span>
-                  ) : isListening ? (
+                  ) : voiceRecognition.isListening ? (
                     <span className="text-nature">Listening...</span>
                   ) : (
                     <span className="text-muted-foreground">Microphone ready</span>
                   )}
                 </div>
                 
-                {interim && (
+                {voiceRecognition.interim && (
                   <div className="text-sm text-muted-foreground italic">
-                    {interim}
+                    {voiceRecognition.interim}
                   </div>
                 )}
                 
-                {final && (
+                {voiceRecognition.final && (
                   <div className="text-sm text-nature font-medium">
                     <div className="flex items-center gap-4">
-                      ✓ {final}
+                      ✓ {voiceRecognition.final}
                     </div>
                   </div>
                 )}
@@ -782,12 +782,21 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
                   onMouseDown={(e) => e.preventDefault()}
                   onTouchStart={(e) => e.preventDefault()}
                   className="gap-2"
-                  disabled={!hasPermission}
+                  disabled={!voiceRecognition.hasPermission}
                 >
-                  {isListening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
-                  {isListening ? 'Stop' : 'Start'}
+                  {voiceRecognition.isListening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+                  {voiceRecognition.isListening ? 'Stop' : 'Start'}
                 </Button>
               </div>
+            </div>
+            
+            {/* Spell List */}
+            <div className="flex justify-center lg:justify-start">
+              <SpellList 
+                isCollapsed={spellListCollapsed}
+                onToggleCollapse={() => setSpellListCollapsed(!spellListCollapsed)}
+                className="w-full max-w-80"
+              />
             </div>
             
             {/* Cast Feed */}
