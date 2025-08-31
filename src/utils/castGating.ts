@@ -78,6 +78,8 @@ export function canCastGate(params: CastGateParams): CastGateResult {
       };
       reason: "ON_COOLDOWN",
       details: `${Math.ceil(remainingMs)}ms remaining`
+    }
+  }
 
   // Check cooldown (always enforced)
   const timeSinceLastCast = now - lastCastTs;
