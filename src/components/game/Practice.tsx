@@ -36,7 +36,7 @@ export const Practice = ({ onBack, isIPSafe }: PracticeProps) => {
     bestAccuracy: 0
   });
 
-  // NEW: Enhanced state for live feedback
+  // Enhanced state for live feedback
   const [topGuesses, setTopGuesses] = useState<Array<{
     spellId: string;
     name: string;
@@ -49,17 +49,12 @@ export const Practice = ({ onBack, isIPSafe }: PracticeProps) => {
   const [hotwordEnabled] = useState(false);
   const [hotword] = useState('arcanum');
   const [showDebug, setShowDebug] = useState(false);
+  const [blockReason, setBlockReason] = useState<string>();
+  const [blockDetails, setBlockDetails] = useState<string>();
 
   const { toast } = useToast();
 
-  // Initialize voice recognition first
-  const voiceState = useVoiceRecognition(
-    undefined, // Legacy onResult - not used with new callbacks
-    hotwordEnabled,
-    hotword
-  );
-
-  // NEW: Enhanced interim callback for live spell guesses
+  // Enhanced interim callback for live spell guesses
   const handleInterim = useCallback((transcript: string) => {
     if (!transcript.trim()) {
       setTopGuesses([]);
@@ -75,7 +70,7 @@ export const Practice = ({ onBack, isIPSafe }: PracticeProps) => {
     })));
   }, []);
 
-  // NEW: Enhanced final callback with cast gating
+  // Enhanced final callback with cast gating
   const handleFinal = useCallback((transcript: string) => {
     if (!transcript.trim()) return;
 
@@ -96,6 +91,8 @@ export const Practice = ({ onBack, isIPSafe }: PracticeProps) => {
     });
 
     if (!gateResult.ok) {
+      setBlockReason(gateResult.reason);
+      setBlockDetails(gateResult.details);
       toast({
         title: "Cast Blocked",
         description: gateResult.details || gateResult.reason,
@@ -103,6 +100,10 @@ export const Practice = ({ onBack, isIPSafe }: PracticeProps) => {
       });
       return;
     }
+
+    // Clear block reason on success
+    setBlockReason(undefined);
+    setBlockDetails(undefined);
 
     // Find best spell match
     const matches = findSpellMatches(transcript, 0.4, 1);
@@ -143,15 +144,18 @@ export const Practice = ({ onBack, isIPSafe }: PracticeProps) => {
         variant: "destructive"
       });
     }
-  }, [voiceState.loudness, lastCastTime, cooldownMs, lastTranscript, minRms, hotwordEnabled, hotword, toast]);
+  }, [lastCastTime, cooldownMs, lastTranscript, minRms, hotwordEnabled, hotword, toast]);
 
-  // Update voice recognition callbacks
-  useEffect(() => {
-    voiceState.onInterim = handleInterim;
-    voiceState.onFinal = handleFinal;
-  }, [handleInterim, handleFinal]);
+  // Initialize voice recognition
+  const voiceState = useVoiceRecognition(
+    undefined, // Legacy onResult - not used with new callbacks
+    hotwordEnabled,
+    hotword,
+    handleInterim,
+    handleFinal
+  );
 
-  // FIX: Auto-start mic detection and SR on mount
+  // Auto-start mic detection and SR on mount
   useEffect(() => {
     const initializeMic = async () => {
       try {
@@ -163,9 +167,9 @@ export const Practice = ({ onBack, isIPSafe }: PracticeProps) => {
     };
     
     initializeMic();
-  }, [voiceState.primeMic, voiceState.startListening]);
+  }, []);
 
-  // NEW: Keyboard shortcut for debug panel
+  // Keyboard shortcut for debug panel
   useEffect(() => {
     const handleKeyPress = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === 'd') {
@@ -178,7 +182,7 @@ export const Practice = ({ onBack, isIPSafe }: PracticeProps) => {
     return () => window.removeEventListener('keydown', handleKeyPress);
   }, [showDebug]);
 
-  // NEW: Build debug state
+  // Build debug state
   const debugState: CastDebugState = {
     srSupported: voiceState.supported,
     srListening: voiceState.isListening,
@@ -186,8 +190,8 @@ export const Practice = ({ onBack, isIPSafe }: PracticeProps) => {
     srLanguage: 'en-US',
     rms: voiceState.loudness,
     dbfs: voiceState.dbfs,
-    interim: voiceState.interim,
-    final: voiceState.final,
+    interim: voiceState.interim || '',
+    final: voiceState.final || '',
     topGuesses,
     eligibility: {
       finalOK: !!voiceState.final,
@@ -196,6 +200,8 @@ export const Practice = ({ onBack, isIPSafe }: PracticeProps) => {
       notDuplicate: voiceState.final !== lastTranscript,
       hotwordOK: !hotwordEnabled || (voiceState.final?.toLowerCase().startsWith(hotword.toLowerCase()) ?? false)
     },
+    blockReason,
+    blockDetails,
     hotwordEnabled,
     hotword,
     minRms,
@@ -227,7 +233,7 @@ export const Practice = ({ onBack, isIPSafe }: PracticeProps) => {
           </div>
         </div>
 
-        {/* NEW: Enhanced Voice Interface with live feedback */}
+        {/* Enhanced Voice Interface with live feedback */}
         <Card className="mb-8">
           <CardHeader>
             <div className="flex items-center justify-between">
@@ -363,7 +369,7 @@ export const Practice = ({ onBack, isIPSafe }: PracticeProps) => {
           </CardContent>
         </Card>
 
-        {/* NEW: Debug Panel */}
+        {/* Debug Panel */}
         {showDebug && (
           <CastDebugPanel state={debugState} className="mb-8" />
         )}

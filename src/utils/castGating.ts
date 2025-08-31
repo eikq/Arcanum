@@ -1,4 +1,4 @@
-// NEW: Cast gating logic with detailed reasons
+// Cast gating logic with detailed reasons
 
 export interface CastGateParams {
   isFinal: boolean;
@@ -81,7 +81,7 @@ export function canCastGate(params: CastGateParams): CastGateResult {
     return {
       ok: false,
       reason: "ON_COOLDOWN",
-      details: `${remainingMs}ms remaining`
+      details: `${Math.ceil(remainingMs)}ms remaining`
     };
   }
 

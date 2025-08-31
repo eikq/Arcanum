@@ -2,41 +2,46 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { VoiceRecognitionState } from '@/types/game';
 import { AudioMeter, AudioMeterState } from '@/audio/AudioMeter';
 
-// NEW: Enhanced SR result types
-export type SRResult = { transcript: string; isFinal: boolean; alt?: string[]; };
+// Enhanced SR result types
+export type SRResult = { transcript: string; isFinal: boolean; alt?: string[] };
 
-export interface VoiceRecognitionHook extends VoiceRecognitionState {
+export interface UseSpeechRecognition {
+  start: () => Promise<void>;
+  stop: () => void;
+  restart: () => Promise<void>;
+  listening: boolean;
+  supported: boolean;
+  hasPermission: boolean;
+  interim?: string;
+  final?: string;
+  error?: string;
+  dbfs: number;
+  rms: () => number;
+  micDenied: boolean;
+  onInterim?: (t: string) => void;
+  onFinal?: (t: string) => void;
+  
+  // Legacy compatibility
+  isListening: boolean;
+  isSupported: boolean;
+  transcript: string;
+  confidence: number;
+  loudness: number;
   startListening: () => Promise<void>;
   stopListening: () => void;
-  restart: () => Promise<void>;
   toggle: () => void;
   resetTranscript: () => void;
   primeMic: (deviceId?: string) => Promise<MediaStream>;
-  
-  // NEW: Enhanced state
-  interim: string;
-  final: string;
-  supported: boolean;
-  error?: string;
-  dbfs: number;
-  
-  // NEW: Callbacks
-  onInterim?: (transcript: string) => void;
-  onFinal?: (transcript: string) => void;
-  
-  // Deprecated but kept for compatibility
-  autoStartListening?: () => Promise<void>;
-  rms: () => number;
-  micDenied: boolean;
+  autoStartListening: () => Promise<void>;
 }
 
 export const useVoiceRecognition = (
   onResult?: (transcript: string, confidence: number, loudness: number) => void,
   hotwordEnabled = false,
   hotword = 'arcanum',
-  onInterim?: (transcript: string) => void,
-  onFinal?: (transcript: string) => void
-): VoiceRecognitionHook => {
+  onInterimCallback?: (transcript: string) => void,
+  onFinalCallback?: (transcript: string) => void
+): UseSpeechRecognition => {
   const [state, setState] = useState<VoiceRecognitionState>({
     isListening: false,
     isSupported: false,
@@ -46,7 +51,7 @@ export const useVoiceRecognition = (
     loudness: 0
   });
 
-  // NEW: Enhanced state
+  // Enhanced state
   const [interim, setInterim] = useState('');
   const [final, setFinal] = useState('');
   const [micDenied, setMicDenied] = useState(false);
@@ -57,9 +62,17 @@ export const useVoiceRecognition = (
   const audioMeterRef = useRef<AudioMeter | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const restartTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const lastTranscriptRef = useRef<string>('');
-  const lastResultTimeRef = useRef<number>(0);
   const backoffRef = useRef<number>(500);
+
+  // Callback refs for external setting
+  const onInterimRef = useRef<((t: string) => void) | undefined>(onInterimCallback);
+  const onFinalRef = useRef<((t: string) => void) | undefined>(onFinalCallback);
+
+  // Update callback refs
+  useEffect(() => {
+    onInterimRef.current = onInterimCallback;
+    onFinalRef.current = onFinalCallback;
+  }, [onInterimCallback, onFinalCallback]);
 
   // Initialize speech recognition
   useEffect(() => {
@@ -79,62 +92,55 @@ export const useVoiceRecognition = (
       // Speech recognition event handlers
       recognition.onstart = () => {
         setState(prev => ({ ...prev, isListening: true }));
+        setError(undefined);
       };
 
       recognition.onend = () => {
         setState(prev => ({ ...prev, isListening: false }));
         
-        // FIX: Auto-restart with capped backoff
-        if (state.isListening) {
-          let backoff = 500;
-          const maxBackoff = 5000;
+        // Auto-restart with capped backoff if we were supposed to be listening
+        if (state.isListening && !micDenied) {
           const restartSR = () => {
             if (restartTimeoutRef.current) clearTimeout(restartTimeoutRef.current);
             restartTimeoutRef.current = setTimeout(() => {
               try {
                 if (recognitionRef.current && state.isListening) {
-                  recognitionRef.current.start();
+                  recognition.start();
+                  backoffRef.current = 500; // Reset on success
                 }
               } catch (error) {
                 console.warn('Failed to restart SR:', error);
-                backoff = Math.min(maxBackoff, backoff + 250);
+                backoffRef.current = Math.min(5000, backoffRef.current * 1.5);
                 restartSR();
               }
-            }, backoff);
+            }, backoffRef.current);
           };
           restartSR();
         }
       };
 
-        recognition.onerror = (event) => {
+      recognition.onerror = (event) => {
         console.warn('Speech recognition error:', event.error);
         
         if (event.error === 'not-allowed') {
           setState(prev => ({ ...prev, hasPermission: false, isListening: false }));
-          setMicDenied(true); // FIX: Track mic denial
-        } else {
-          // Retry on other errors with capped backoff
-          let retryCount = 0;
-          const maxRetries = 3;
-          const retryWithBackoff = () => {
-            if (retryCount >= maxRetries || !state.isListening) return;
-            
-            const delay = Math.min(5000, 1000 * Math.pow(2, retryCount));
+          setMicDenied(true);
+          setError('Microphone permission denied');
+        } else if (event.error === 'no-speech') {
+          // This is normal, just restart
+          if (state.isListening) {
             setTimeout(() => {
-              if (state.isListening && recognitionRef.current) {
-                try {
+              try {
+                if (recognitionRef.current && state.isListening) {
                   recognition.start();
-                } catch (error) {
-                  console.warn(`Retry ${retryCount + 1} failed:`, error);
-                  retryCount++;
-                  retryWithBackoff();
                 }
+              } catch (e) {
+                console.warn('Failed to restart after no-speech:', e);
               }
-            }, delay);
-          };
-          
-          retryCount++;
-          retryWithBackoff();
+            }, 1000);
+          }
+        } else {
+          setError(`Speech recognition error: ${event.error}`);
         }
       };
 
@@ -145,20 +151,18 @@ export const useVoiceRecognition = (
         // Process all results
         for (let i = event.resultIndex; i < results.length; i++) {
           const result = results[i];
-          const transcript = result[0].transcript;
+          const transcript = result[0].transcript.trim();
           
           if (result.isFinal) {
-            const cleanTranscript = transcript.trim();
             const confidence = result[0].confidence || 0.9;
-            const now = Date.now();
 
             // Update final transcript
-            setFinal(cleanTranscript);
-            onFinal?.(cleanTranscript);
+            setFinal(transcript);
+            onFinalRef.current?.(transcript);
 
             // Legacy handling - check for hotword if enabled
-            if (hotwordEnabled) {
-              const lowerTranscript = cleanTranscript.toLowerCase();
+            if (hotwordEnabled && transcript) {
+              const lowerTranscript = transcript.toLowerCase();
               const lowerHotword = hotword.toLowerCase();
               
               if (lowerTranscript.includes(lowerHotword)) {
@@ -168,9 +172,9 @@ export const useVoiceRecognition = (
                   onResult?.(spellPart, confidence, state.loudness);
                 }
               }
-            } else {
-              setState(prev => ({ ...prev, transcript: cleanTranscript, confidence }));
-              onResult?.(cleanTranscript, confidence, state.loudness);
+            } else if (transcript) {
+              setState(prev => ({ ...prev, transcript, confidence }));
+              onResult?.(transcript, confidence, state.loudness);
             }
 
             // Clear interim after final
@@ -182,10 +186,13 @@ export const useVoiceRecognition = (
         
         // Update interim transcript
         if (interimTranscript) {
-          setInterim(interimTranscript.trim());
-          onInterim?.(interimTranscript.trim());
+          setInterim(interimTranscript);
+          onInterimRef.current?.(interimTranscript);
         }
       };
+    } else {
+      console.warn('Speech recognition not supported');
+      setState(prev => ({ ...prev, isSupported: false }));
     }
 
     return () => {
@@ -193,9 +200,9 @@ export const useVoiceRecognition = (
         clearTimeout(restartTimeoutRef.current);
       }
     };
-  }, [hotwordEnabled, hotword, onResult, state.isListening, state.loudness]);
+  }, [hotwordEnabled, hotword, onResult, state.isListening, state.loudness, micDenied]);
 
-  // NEW: Prime microphone with AudioMeter integration
+  // Prime microphone with AudioMeter integration
   const primeMic = useCallback(async (deviceId?: string): Promise<MediaStream> => {
     try {
       const constraints: MediaStreamConstraints = {
@@ -240,36 +247,7 @@ export const useVoiceRecognition = (
     }
   }, []);
 
-  // NEW: Restart with exponential backoff
-  const restart = useCallback(async () => {
-    if (restartTimeoutRef.current) {
-      clearTimeout(restartTimeoutRef.current);
-      restartTimeoutRef.current = null;
-    }
-
-    const maxBackoff = 5000;
-    restartTimeoutRef.current = setTimeout(async () => {
-      try {
-        if (recognitionRef.current && !state.isListening) {
-          await startListening();
-          backoffRef.current = 500; // Reset backoff on success
-        }
-      } catch (error) {
-        console.warn('Failed to restart SR:', error);
-        backoffRef.current = Math.min(maxBackoff, backoffRef.current * 1.5);
-        restart(); // Retry with increased backoff
-      }
-    }, backoffRef.current);
-  }, [state.isListening]);
-
-  // Legacy support
-  const autoStartListening = useCallback(async () => {
-    if (!state.hasPermission) {
-      await primeMic();
-    }
-    await startListening();
-  }, [state.hasPermission, primeMic]);
-
+  // Start listening
   const startListening = useCallback(async () => {
     if (!recognitionRef.current) {
       setError('Speech recognition not available');
@@ -292,6 +270,7 @@ export const useVoiceRecognition = (
     }
   }, [state.hasPermission, primeMic]);
 
+  // Stop listening
   const stopListening = useCallback(() => {
     if (restartTimeoutRef.current) {
       clearTimeout(restartTimeoutRef.current);
@@ -309,6 +288,14 @@ export const useVoiceRecognition = (
     setState(prev => ({ ...prev, isListening: false }));
   }, []);
 
+  // Restart with exponential backoff
+  const restart = useCallback(async () => {
+    stopListening();
+    await new Promise(resolve => setTimeout(resolve, backoffRef.current));
+    await startListening();
+  }, [startListening, stopListening]);
+
+  // Toggle listening
   const toggle = useCallback(() => {
     if (state.isListening) {
       stopListening();
@@ -317,11 +304,17 @@ export const useVoiceRecognition = (
     }
   }, [state.isListening, startListening, stopListening]);
 
+  // Reset transcript
   const resetTranscript = useCallback(() => {
     setState(prev => ({ ...prev, transcript: '', confidence: 0 }));
     setInterim('');
     setFinal('');
   }, []);
+
+  // RMS getter
+  const rms = useCallback(() => {
+    return audioMeterRef.current?.getRms() ?? state.loudness;
+  }, [state.loudness]);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -338,34 +331,42 @@ export const useVoiceRecognition = (
     };
   }, []);
 
-  // Legacy RMS getter
-  const rms = useCallback(() => {
-    return state.loudness;
-  }, [state.loudness]);
+  // Legacy compatibility method
+  const autoStartListening = useCallback(async () => {
+    if (!state.hasPermission) {
+      await primeMic();
+    }
+    await startListening();
+  }, [state.hasPermission, primeMic, startListening]);
 
   return {
-    ...state,
+    // New API
+    start: startListening,
+    stop: stopListening,
+    restart,
+    listening: state.isListening,
+    supported: state.isSupported,
+    hasPermission: state.hasPermission,
+    interim,
+    final,
+    error,
+    dbfs,
+    rms,
+    micDenied,
+    onInterim: onInterimRef.current,
+    onFinal: onFinalRef.current,
+    
+    // Legacy API
+    isListening: state.isListening,
+    isSupported: state.isSupported,
+    transcript: state.transcript,
+    confidence: state.confidence,
+    loudness: state.loudness,
     startListening,
     stopListening,
-    restart,
     toggle,
     resetTranscript,
     primeMic,
-    
-    // NEW: Enhanced state
-    interim,
-    final,
-    supported: state.isSupported,
-    error,
-    dbfs,
-    
-    // NEW: Callbacks (for external setting)
-    onInterim,
-    onFinal,
-    
-    // Legacy compatibility
-    autoStartListening,
-    rms,
-    micDenied
+    autoStartListening
   };
 };

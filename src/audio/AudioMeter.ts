@@ -1,4 +1,4 @@
-// NEW: Real-time audio metering with RMS and dBFS calculation
+// Real-time audio metering with RMS and dBFS calculation
 export interface AudioMeterState {
   rms: number;
   dbfs: number;
@@ -121,6 +121,14 @@ export class AudioMeter {
   subscribe(callback: AudioMeterCallback): () => void {
     this.subscribers.add(callback);
     return () => this.subscribers.delete(callback);
+  }
+
+  getRms(): number {
+    return this.smoothedRms;
+  }
+
+  getDbfs(): number {
+    return this.rmsToDbfs(this.smoothedRms);
   }
 
   cleanup(): void {

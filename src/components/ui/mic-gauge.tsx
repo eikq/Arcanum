@@ -1,4 +1,4 @@
-// NEW: Live microphone gauge with RMS/dBFS display
+// Live microphone gauge with RMS/dBFS display
 import { cn } from '@/lib/utils';
 import { Mic, MicOff } from 'lucide-react';
 
@@ -27,7 +27,6 @@ export const MicGauge = ({
 
   // Calculate ring radius based on RMS (20px base + up to 20px growth)
   const ringRadius = 20 + (rms * 20);
-  const circumference = 2 * Math.PI * ringRadius;
 
   return (
     <div className={cn("relative flex flex-col items-center gap-2", className)}>

@@ -1,4 +1,4 @@
-// NEW: Shared network types for client/server communication
+// Shared network types for client/server communication
 export type PlayerID = string;
 export type RoomID = string;
 
@@ -62,11 +62,11 @@ export interface ServerToClient {
   "opponent:left": (d: { roomId: RoomID }) => void;
 }
 
-// FIX: Client cooldown guards
+// Client cooldown guards
 let lastCast = 0;
 export const canCast = () => performance.now() - lastCast >= 1000;
 export const markCast = () => { lastCast = performance.now(); };
 
-// FIX: Server-synced timer utility
+// Server-synced timer utility
 export const makeServerTimer = (endsAt: number, getOffset: () => number) =>
   () => Math.max(0, endsAt - (Date.now() + getOffset()));
