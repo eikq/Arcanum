@@ -11,11 +11,12 @@ import { cn } from '@/lib/utils';
 interface PlayMenuProps {
   onBack: () => void;
   onStartMatch: (mode: 'quick' | 'create' | 'join' | 'bot', data?: any) => void;
+  isConnected: boolean;
 }
 
 type PlayMode = 'menu' | 'quick' | 'invite' | 'bot' | 'lobby';
 
-export const PlayMenu = ({ onBack, onStartMatch }: PlayMenuProps) => {
+export const PlayMenu = ({ onBack, onStartMatch, isConnected }: PlayMenuProps) => {
   const [currentMode, setCurrentMode] = useState<PlayMode>('menu');
   const [roomCode, setRoomCode] = useState('');
   const [playerName, setPlayerName] = useState('Player');
@@ -23,6 +24,15 @@ export const PlayMenu = ({ onBack, onStartMatch }: PlayMenuProps) => {
   const [isConnecting, setIsConnecting] = useState(false);
 
   const handleQuickMatch = async () => {
+    if (!isConnected) {
+      toast({
+        title: "Not Connected",
+        description: "Please wait for connection to game server.",
+        variant: "destructive",
+      });
+      return;
+    }
+    
     setIsConnecting(true);
     setCurrentMode('lobby');
     
@@ -40,6 +50,15 @@ export const PlayMenu = ({ onBack, onStartMatch }: PlayMenuProps) => {
   };
 
   const handleCreateRoom = async () => {
+    if (!isConnected) {
+      toast({
+        title: "Not Connected",
+        description: "Please wait for connection to game server.",
+        variant: "destructive",
+      });
+      return;
+    }
+    
     setIsConnecting(true);
     try {
       await onStartMatch('create', { nick: playerName });
@@ -58,6 +77,15 @@ export const PlayMenu = ({ onBack, onStartMatch }: PlayMenuProps) => {
       toast({
         title: "Invalid Room Code",
         description: "Please enter a valid 6-character room code.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (!isConnected) {
+      toast({
+        title: "Not Connected",
+        description: "Please wait for connection to game server.",
         variant: "destructive",
       });
       return;
@@ -128,7 +156,7 @@ export const PlayMenu = ({ onBack, onStartMatch }: PlayMenuProps) => {
                 <Button 
                   onClick={handleQuickMatch}
                   className="w-full"
-                  disabled={isConnecting}
+                  disabled={isConnecting || !isConnected}
                 >
                   {isConnecting ? (
                     <>
@@ -173,7 +201,7 @@ export const PlayMenu = ({ onBack, onStartMatch }: PlayMenuProps) => {
                   <Button 
                     onClick={handleCreateRoom}
                     variant="outline"
-                    disabled={isConnecting}
+                    disabled={isConnecting || !isConnected}
                   >
                     Create Room
                   </Button>
@@ -280,7 +308,7 @@ export const PlayMenu = ({ onBack, onStartMatch }: PlayMenuProps) => {
             </Button>
             <Button 
               onClick={handleJoinRoom}
-              disabled={isConnecting || roomCode.length !== 6}
+              disabled={isConnecting || roomCode.length !== 6 || !isConnected}
               className="flex-1"
             >
               {isConnecting ? (

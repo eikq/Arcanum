@@ -1,49 +1,41 @@
 import { io, Socket } from 'socket.io-client';
-import type { ServerToClientEvents, ClientToServerEvents, CastPayload } from '../shared/events';
+import type { ClientToServer, ServerToClient, CastPayload, RoomSnapshot, PlayerID, RoomID, QueueMode } from '../shared/net';
 
-export type QueueMode = 'quick' | 'code' | 'bot';
-export type GameMode = 'quick' | 'code' | 'bot' | 'practice';
+// FIX: Updated to use shared types and new state machine
+export type ConnectionState = 'disconnected' | 'connecting' | 'connected';
 
-export interface GameState {
-  players: Array<{
-    id: string;
-    nick: string;
-    hp: number;
-    maxHp: number;
-    mana: number;
-    maxMana: number;
-  }>;
-  roomId: string;
-  currentTurn?: string;
-  isActive: boolean;
-}
-
-export interface NetEvents {
-  // Queue events
-  'queue:join': { mode: QueueMode; roomCode?: string; nick?: string; vsBot?: boolean };
-  'queue:waiting': { position: number };
-  'match:found': { roomId: string; players: Array<{ id: string; nick: string }>; vsBot?: boolean };
-  'match:start': { countdown: number };
-  
-  // Game events
-  'cast': CastPayload;
-  'state:update': Partial<GameState>;
-  'opponent:left': { playerId: string };
-  
-  // Voice chat
-  'rtc:signal': { to: string; from: string; data: any };
+export interface NetClientEvents {
+  'connection_changed': (state: ConnectionState) => void;
+  'room_updated': (snapshot: RoomSnapshot) => void;
+  'cast_received': (cast: CastPayload & { from: PlayerID }) => void;
+  'error': (error: { code: string; message: string }) => void;
+  'opponent_left': (data: { roomId: RoomID }) => void;
 }
 
 export class NetClient {
-  private socket: Socket<ServerToClientEvents, ClientToServerEvents> | null = null;
+  private socket: Socket<ServerToClient, ClientToServer> | null = null;
+  private connectionState: ConnectionState = 'disconnected';
   private lastCastTime = 0;
   private castCooldown = 1000; // 1 second minimum between casts
   private lastCastData = new Map<string, number>(); // spellId -> timestamp for deduplication
+  private serverOffsetMs = 0; // FIX: Server time synchronization
+  private heartbeatInterval: NodeJS.Timeout | null = null;
+  public currentRoom: RoomID | null = null;
+  private listeners: Map<keyof NetClientEvents, Function[]> = new Map();
 
   constructor(private serverUrl = 'ws://localhost:3001') {}
 
+  // FIX: Explicit connection management with state tracking
   connect(): Promise<void> {
     return new Promise((resolve, reject) => {
+      if (this.connectionState === 'connected') {
+        resolve();
+        return;
+      }
+
+      this.connectionState = 'connecting';
+      this.emit('connection_changed', this.connectionState);
+
       try {
         this.socket = io(this.serverUrl, {
           transports: ['websocket'],
@@ -52,73 +44,140 @@ export class NetClient {
 
         this.socket.on('connect', () => {
           console.log('Connected to game server');
+          this.connectionState = 'connected';
+          this.emit('connection_changed', this.connectionState);
+          this.startHeartbeat();
           resolve();
         });
 
         this.socket.on('connect_error', (error) => {
           console.warn('Failed to connect to game server:', error);
+          this.connectionState = 'disconnected';
+          this.emit('connection_changed', this.connectionState);
           reject(error);
         });
 
         this.socket.on('disconnect', () => {
           console.log('Disconnected from game server');
+          this.connectionState = 'disconnected';
+          this.emit('connection_changed', this.connectionState);
+          this.stopHeartbeat();
         });
+
+        // FIX: Handle new server events
+        this.socket.on('room:snapshot', (snapshot) => {
+          this.serverOffsetMs = snapshot.serverNow - Date.now();
+          this.emit('room_updated', snapshot);
+        });
+
+        this.socket.on('cast', (cast) => {
+          this.emit('cast_received', cast);
+        });
+
+        this.socket.on('error', (error) => {
+          this.emit('error', error);
+        });
+
+        this.socket.on('opponent:left', (data) => {
+          this.emit('opponent_left', data);
+        });
+
       } catch (error) {
+        this.connectionState = 'disconnected';
+        this.emit('connection_changed', this.connectionState);
         reject(error);
       }
     });
   }
 
   disconnect(): void {
+    this.stopHeartbeat();
     if (this.socket) {
       this.socket.disconnect();
       this.socket = null;
     }
+    this.connectionState = 'disconnected';
+    this.currentRoom = null;
+    this.emit('connection_changed', this.connectionState);
   }
 
   isConnected(): boolean {
-    return this.socket?.connected ?? false;
+    return this.connectionState === 'connected';
   }
 
-  // Queue management
-  async quickMatch(nick: string = 'Player'): Promise<void> {
+  getConnectionState(): ConnectionState {
+    return this.connectionState;
+  }
+
+  getServerOffset(): number {
+    return this.serverOffsetMs;
+  }
+
+  // FIX: Updated queue management with ACK responses
+  async quickMatch(nick: string = 'Player'): Promise<RoomID> {
     if (!this.socket) throw new Error('Not connected');
-    this.socket.emit('queue:join', { mode: 'quick', nick });
-  }
-
-  async createRoom(nick: string = 'Host'): Promise<string> {
+    
     return new Promise((resolve, reject) => {
-      if (!this.socket) {
-        reject(new Error('Not connected'));
-        return;
-      }
-
-      const roomCode = this.generateRoomCode();
-      this.socket.emit('queue:join', { mode: 'code', roomCode, nick });
-      
-      // Listen for room creation confirmation
-      this.socket.once('match:found', (data) => {
-        resolve(roomCode);
+      this.socket!.emit('queue:join', { mode: 'quick', nick }, (ok, msg, roomId) => {
+        if (ok && roomId) {
+          this.currentRoom = roomId;
+          resolve(roomId);
+        } else {
+          reject(new Error(msg || 'Failed to join queue'));
+        }
       });
-
-      // Timeout after 5 seconds
-      setTimeout(() => reject(new Error('Room creation timeout')), 5000);
     });
   }
 
-  async joinRoom(roomCode: string, nick: string = 'Player'): Promise<void> {
+  async createRoom(nick: string = 'Host'): Promise<RoomID> {
     if (!this.socket) throw new Error('Not connected');
-    this.socket.emit('queue:join', { mode: 'code', roomCode, nick });
+    
+    return new Promise((resolve, reject) => {
+      const roomCode = this.generateRoomCode();
+      this.socket!.emit('queue:join', { mode: 'code', roomCode, nick }, (ok, msg, roomId) => {
+        if (ok && roomId) {
+          this.currentRoom = roomId;
+          resolve(roomId);
+        } else {
+          reject(new Error(msg || 'Failed to create room'));
+        }
+      });
+    });
   }
 
-  async playVsBot(difficulty: 'easy' | 'medium' | 'hard', nick: string = 'Player'): Promise<void> {
+  async joinRoom(roomCode: string, nick: string = 'Player'): Promise<RoomID> {
     if (!this.socket) throw new Error('Not connected');
-    this.socket.emit('queue:join', { mode: 'bot', vsBot: true, nick });
+    
+    return new Promise((resolve, reject) => {
+      this.socket!.emit('queue:join', { mode: 'code', roomCode, nick }, (ok, msg, roomId) => {
+        if (ok && roomId) {
+          this.currentRoom = roomId;
+          resolve(roomId);
+        } else {
+          reject(new Error(msg || 'Room not found or full'));
+        }
+      });
+    });
   }
 
-  // Game actions
+  async playVsBot(difficulty: 'easy' | 'medium' | 'hard', nick: string = 'Player'): Promise<RoomID> {
+    if (!this.socket) throw new Error('Not connected');
+    
+    return new Promise((resolve, reject) => {
+      this.socket!.emit('queue:join', { mode: 'bot', nick }, (ok, msg, roomId) => {
+        if (ok && roomId) {
+          this.currentRoom = roomId;
+          resolve(roomId);
+        } else {
+          reject(new Error(msg || 'Failed to start bot match'));
+        }
+      });
+    });
+  }
+
+  // FIX: Updated game actions with room state validation
   sendCast(payload: CastPayload): boolean {
-    if (!this.socket || !this.canCast(payload.spellId, payload.ts)) {
+    if (!this.socket || !this.currentRoom || !this.canCast(payload.spellId, payload.ts)) {
       return false;
     }
 
@@ -127,26 +186,46 @@ export class NetClient {
     return true;
   }
 
-  sendState(state: Partial<GameState>): void {
-    if (!this.socket) return;
-    this.socket.emit('state:update', state);
+  setReady(ready: boolean, micReady: boolean): void {
+    if (!this.socket || !this.currentRoom) return;
+    this.socket.emit('room:ready', { roomId: this.currentRoom, ready, micReady });
+  }
+
+  leaveRoom(): void {
+    if (!this.socket || !this.currentRoom) return;
+    this.socket.emit('room:leave', { roomId: this.currentRoom });
+    this.currentRoom = null;
   }
 
   // Voice chat signaling
-  sendSignal(roomId: string, to: string, data: any): void {
-    if (!this.socket) return;
-    this.socket.emit('rtc:signal', { roomId, to, sdp: data.sdp, ice: data.ice });
+  sendSignal(to: PlayerID, data: any): void {
+    if (!this.socket || !this.currentRoom) return;
+    this.socket.emit('rtc:signal', { roomId: this.currentRoom, to, data });
   }
 
-  // Event listeners
-  on<K extends keyof ServerToClientEvents>(event: K, callback: ServerToClientEvents[K]): void {
-    if (!this.socket) return;
-    this.socket.on(event, callback as any);
+  // FIX: Event system for client events
+  on<K extends keyof NetClientEvents>(event: K, callback: NetClientEvents[K]): void {
+    if (!this.listeners.has(event)) {
+      this.listeners.set(event, []);
+    }
+    this.listeners.get(event)!.push(callback);
   }
 
-  off<K extends keyof ServerToClientEvents>(event: K, callback?: Function): void {
-    if (!this.socket) return;
-    this.socket.off(event, callback as any);
+  off<K extends keyof NetClientEvents>(event: K, callback?: Function): void {
+    const eventListeners = this.listeners.get(event);
+    if (eventListeners && callback) {
+      const index = eventListeners.indexOf(callback);
+      if (index > -1) {
+        eventListeners.splice(index, 1);
+      }
+    }
+  }
+
+  private emit<K extends keyof NetClientEvents>(event: K, ...args: Parameters<NetClientEvents[K]>): void {
+    const eventListeners = this.listeners.get(event);
+    if (eventListeners) {
+      eventListeners.forEach(callback => callback(...args));
+    }
   }
 
   // Anti-spam protection
@@ -170,6 +249,23 @@ export class NetClient {
   private markCast(spellId: string, timestamp: number): void {
     this.lastCastTime = performance.now();
     this.lastCastData.set(spellId, timestamp);
+  }
+
+  // FIX: Heartbeat system for connection health
+  private startHeartbeat(): void {
+    this.stopHeartbeat();
+    this.heartbeatInterval = setInterval(() => {
+      if (this.socket && this.currentRoom) {
+        this.socket.emit('heartbeat', { roomId: this.currentRoom, t: Date.now() });
+      }
+    }, 5000);
+  }
+
+  private stopHeartbeat(): void {
+    if (this.heartbeatInterval) {
+      clearInterval(this.heartbeatInterval);
+      this.heartbeatInterval = null;
+    }
   }
 
   private generateRoomCode(): string {

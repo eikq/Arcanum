@@ -1,4 +1,5 @@
 import { netClient } from './NetClient';
+import type { PlayerID } from '../shared/net';
 
 export class VoiceChat {
   private localStream: MediaStream | null = null;
@@ -51,7 +52,7 @@ export class VoiceChat {
       // Handle ICE candidates
       this.peerConnection.onicecandidate = (event) => {
         if (event.candidate) {
-          netClient.sendSignal('room', '*', {
+          netClient.sendSignal('*', {
             ice: event.candidate,
           });
         }
@@ -78,7 +79,7 @@ export class VoiceChat {
       const offer = await this.peerConnection.createOffer();
       await this.peerConnection.setLocalDescription(offer);
       
-      netClient.sendSignal('room', peerId, {
+      netClient.sendSignal(peerId, {
         sdp: offer,
       });
     } catch (error) {
@@ -95,7 +96,7 @@ export class VoiceChat {
           await this.peerConnection.setRemoteDescription(data.offer);
           const answer = await this.peerConnection.createAnswer();
           await this.peerConnection.setLocalDescription(answer);
-          netClient.sendSignal('room', '*', {
+          netClient.sendSignal('*', {
             sdp: answer,
           });
           break;
@@ -158,9 +159,9 @@ export class VoiceChat {
   }
 
   private setupRTCEventListeners(): void {
-    netClient.on('rtc:signal', (data) => {
-      this.handleSignal({ sdp: data.sdp, ice: data.ice });
-    });
+    // FIX: Use the correct event system
+    // This will be handled when netClient receives rtc:signal from server
+    // and we'll call handleSignal directly from the Match component
   }
 }
 
