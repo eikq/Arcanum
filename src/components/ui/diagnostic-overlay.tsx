@@ -23,6 +23,14 @@ export interface DiagnosticState {
   // Audio Levels
   rms: number;
   dbfs: number;
+  normalizedRms: number;
+  calibration: {
+    noiseFloor: number;
+    peakRms: number;
+    minRms: number;
+    rmsMargin: number;
+    calibrated: boolean;
+  };
   
   // Speech Recognition
   srSupported: boolean;
@@ -210,7 +218,7 @@ export const DiagnosticOverlay = ({
           {/* Audio Levels */}
           <div className="space-y-3">
             <h3 className="font-medium text-sm">Audio Levels</h3>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-3 gap-4">
               <div>
                 <div className="flex items-center justify-between text-sm mb-2">
                   <span>RMS Level</span>
@@ -220,6 +228,18 @@ export const DiagnosticOverlay = ({
                   <div 
                     className="h-full bg-gradient-to-r from-nature to-light transition-all duration-150"
                     style={{ width: `${Math.min(state.rms * 100, 100)}%` }}
+                  />
+                </div>
+              </div>
+              <div>
+                <div className="flex items-center justify-between text-sm mb-2">
+                  <span>Normalized</span>
+                  <span className="font-mono">{(state.normalizedRms * 100).toFixed(0)}%</span>
+                </div>
+                <div className="h-3 bg-muted rounded-full overflow-hidden">
+                  <div 
+                    className="h-full bg-gradient-to-r from-destructive via-warning to-nature transition-all duration-150"
+                    style={{ width: `${Math.min(state.normalizedRms * 100, 100)}%` }}
                   />
                 </div>
               </div>
@@ -236,6 +256,16 @@ export const DiagnosticOverlay = ({
                 </div>
               </div>
             </div>
+            
+            {/* Calibration Info */}
+            {state.calibration.calibrated && (
+              <div className="grid grid-cols-2 gap-4 text-xs text-muted-foreground">
+                <div>Noise Floor: {(state.calibration.noiseFloor * 100).toFixed(1)}%</div>
+                <div>Peak RMS: {(state.calibration.peakRms * 100).toFixed(1)}%</div>
+                <div>Dynamic minRms: {(state.calibration.minRms * 100).toFixed(1)}%</div>
+                <div>RMS Margin: {(state.calibration.rmsMargin * 100).toFixed(1)}%</div>
+              </div>
+            )}
           </div>
 
           {/* Speech Recognition */}

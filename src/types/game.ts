@@ -77,6 +77,9 @@ export interface GameSettings {
   sensitivity: number;
   hotwordEnabled: boolean;
   ipSafeMode: boolean;
+  minAccuracy: number;
+  alwaysCast: boolean;
+  micSensitivity: number;
   masterVolume: number;
   sfxVolume: number;
   musicVolume: number;

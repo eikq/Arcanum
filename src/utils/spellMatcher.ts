@@ -7,6 +7,47 @@ interface SpellMatch {
   matchType: 'exact' | 'alias' | 'phonetic';
 }
 
+// Fallback spell for when no good match is found
+const ARCANE_BURST: Spell = {
+  id: 'arcane_burst',
+  name: 'Arcane Burst',
+  element: 'arcane',
+  difficulty: 'easy',
+  type: 'attack',
+  aliases: ['burst', 'blast', 'magic'],
+  phonemes: ['AA R K EY N B ER S T'],
+  icon: '✨',
+  damage: 25,
+  manaCost: 15,
+  cooldown: 1000
+};
+
+interface MatchResult {
+  spell: Spell;
+  score: number;
+  matched: boolean;
+}
+// Fallback spell for when no good match is found
+const ARCANE_BURST: Spell = {
+  id: 'arcane_burst',
+  name: 'Arcane Burst',
+  element: 'arcane',
+  difficulty: 'easy',
+  type: 'attack',
+  aliases: ['burst', 'blast', 'magic'],
+  phonemes: ['AA R K EY N B ER S T'],
+  icon: '✨',
+  damage: 25,
+  manaCost: 15,
+  cooldown: 1000
+};
+
+interface MatchResult {
+  spell: Spell;
+  score: number;
+  matched: boolean;
+}
+
 // Phonetic similarity using simplified Levenshtein distance
 function calculatePhoneticSimilarity(input: string, target: string): number {
   const inputClean = input.toLowerCase().replace(/[^a-z]/g, '');
@@ -120,19 +161,68 @@ export function findSpellMatches(
     .slice(0, maxResults);
 }
 
+// Match or fallback - always returns a spell to cast
+export function matchOrFallback(
+  transcript: string, 
+  opts?: { minScore?: number }
+): MatchResult {
+  const minScore = opts?.minScore ?? 0.25;
+  const matches = findSpellMatches(transcript, 0.1, 1); // Very low threshold to find anything
+  
+  if (matches.length > 0 && matches[0].accuracy >= minScore) {
+    return {
+      spell: matches[0].spell,
+      score: matches[0].accuracy,
+      matched: true
+    };
+  }
+  
+  // Return fallback spell
+  return {
+    spell: ARCANE_BURST,
+    score: matches.length > 0 ? matches[0].accuracy : 0.1,
+    matched: false
+  };
+}
+// Match or fallback - always returns a spell to cast
+export function matchOrFallback(
+  transcript: string, 
+  opts?: { minScore?: number }
+): MatchResult {
+  const minScore = opts?.minScore ?? 0.25;
+  const matches = findSpellMatches(transcript, 0.1, 1); // Very low threshold to find anything
+  
+  if (matches.length > 0 && matches[0].accuracy >= minScore) {
+    return {
+      spell: matches[0].spell,
+      score: matches[0].accuracy,
+      matched: true
+    };
+  }
+  
+  // Return fallback spell
+  return {
+    spell: ARCANE_BURST,
+    score: matches.length > 0 ? matches[0].accuracy : 0.1,
+    matched: false
+  };
+}
+
 // Calculate spell power based on accuracy and loudness
 export function calculateSpellPower(
   accuracy: number, 
   loudness: number, 
-  minLoudness = 0.08
+  normalizedRms: number,
+  matched: boolean = true
+  matched: boolean = true
 ): number {
-  // Ensure minimum loudness threshold
-  if (loudness < minLoudness) {
-    return 0;
-  }
+  // New power formula: 60% accuracy + 40% normalized RMS
+  let power = Math.min(accuracy * 0.6 + normalizedRms * 0.4, 1.0);
   
-  // Power formula: 70% accuracy + 30% loudness
-  const power = Math.min(accuracy * 0.7 + loudness * 0.3, 1.0);
+  // Reduce power for fallback spells
+  if (!matched) {
+    power *= 0.6;
+  }
   
   // Clamp between 0 and 1
   return Math.max(0, Math.min(1, power));

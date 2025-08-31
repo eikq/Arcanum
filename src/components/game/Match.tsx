@@ -109,21 +109,13 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
   const voiceRecognition = useVoiceRecognition((transcript, confidence, loudness) => {
     if (gameState !== 'playing' || isPaused || !transcript.trim()) return;
     
-    // FIX: Gate on RMS level
-    if (voiceRecognition.rms() < 0.08) {
-      toast({
-        title: "Volume too low",
-        description: "Speak louder or move closer to the microphone",
-        variant: "default",
-      });
-      return;
-    }
+    // Use lenient casting system
+    const result = matchOrFallback(transcript, { minScore: settings.minAccuracy || 0.25 });
+    const normalizedRms = 0.5; // TODO: Get from audio meter
+    const power = calculateSpellPower(result.score, loudness, normalizedRms, result.matched);
     
-    const matches = findSpellMatches(transcript, settings.sensitivity || 0.6);
-    if (matches.length > 0 && confidence > 0.5) {
-      const match = matches[0];
-      const power = Math.min(1.0, match.accuracy * 0.7 + loudness * 0.3);
-      handleCast(match.spell.id, match.accuracy, loudness, power);
+    if (power > 0) {
+      handleCast(result.spell.id, result.score, loudness, power, result.matched);
     }
   });
 

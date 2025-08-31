@@ -9,6 +9,12 @@ export interface CastGateParams {
   cooldownMs: number;
   lastTranscript: string;
   minRms: number;
+  normalized: number;
+  minAccuracy: number;
+  alwaysCast: boolean;
+  normalized: number;
+  minAccuracy: number;
+  alwaysCast: boolean;
   hotwordEnabled: boolean;
   hotword: string;
 }
@@ -17,6 +23,8 @@ export interface CastGateResult {
   ok: boolean;
   reason?: string;
   details?: string;
+  assist?: boolean;
+  assist?: boolean;
 }
 
 export function canCastGate(params: CastGateParams): CastGateResult {
@@ -29,6 +37,12 @@ export function canCastGate(params: CastGateParams): CastGateResult {
     cooldownMs,
     lastTranscript,
     minRms,
+    normalized,
+    minAccuracy,
+    alwaysCast,
+    normalized,
+    minAccuracy,
+    alwaysCast,
     hotwordEnabled,
     hotword
   } = params;
@@ -62,35 +76,59 @@ export function canCastGate(params: CastGateParams): CastGateResult {
         reason: "HOTWORD_MISSING",
         details: `Must start with "${hotword}"`
       };
-    }
-  }
-
-  // Check RMS threshold
-  if (rms < minRms) {
-    return {
-      ok: false,
-      reason: "LOW_RMS",
-      details: `Volume ${(rms * 100).toFixed(1)}% < ${(minRms * 100).toFixed(1)}%`
-    };
-  }
-
-  // Check cooldown
-  const timeSinceLastCast = now - lastCastTs;
-  if (timeSinceLastCast < cooldownMs) {
-    const remainingMs = cooldownMs - timeSinceLastCast;
-    return {
-      ok: false,
       reason: "ON_COOLDOWN",
       details: `${Math.ceil(remainingMs)}ms remaining`
-    };
-  }
 
+  // Check cooldown (always enforced)
+  const timeSinceLastCast = now - lastCastTs;
   // Check for duplicate transcript (within 500ms)
   if (finalTranscript && finalTranscript === lastTranscript && timeSinceLastCast < 500) {
     return {
       ok: false,
       reason: "DUPLICATE",
       details: "Same transcript within 500ms"
+    };
+  }
+
+  // Lenient volume check: pass if raw RMS >= minRms OR normalized >= 0.25
+  const volumeOk = rms >= minRms || normalized >= 0.25;
+  
+  if (!volumeOk && !alwaysCast) {
+    return {
+      ok: false,
+      reason: "LOW_VOLUME",
+      details: `RMS ${(rms * 100).toFixed(1)}%, normalized ${(normalized * 100).toFixed(1)}%`
+    };
+  }
+
+  // Lenient volume check: pass if raw RMS >= minRms OR normalized >= 0.25
+  const volumeOk = rms >= minRms || normalized >= 0.25;
+  
+  if (!volumeOk && !alwaysCast) {
+    return {
+      ok: false,
+      reason: "LOW_VOLUME",
+      details: `RMS ${(rms * 100).toFixed(1)}%, normalized ${(normalized * 100).toFixed(1)}%`
+    };
+  }
+
+  // If volume failed but always-cast is enabled, allow with assist mode
+  if (!volumeOk && alwaysCast) {
+    return {
+      ok: true,
+      reason: "ASSIST_MODE",
+      details: "Always-cast enabled (reduced power)",
+      assist: true
+    };
+  }
+
+  // If volume failed but always-cast is enabled, allow with assist mode
+  if (!volumeOk && alwaysCast) {
+    return {
+      ok: true,
+      reason: "ASSIST_MODE",
+      details: "Always-cast enabled (reduced power)",
+      assist: true
     };
   }
 

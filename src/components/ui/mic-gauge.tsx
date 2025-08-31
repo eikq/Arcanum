@@ -1,22 +1,27 @@
 // Live microphone gauge with RMS/dBFS display
 import { cn } from '@/lib/utils';
 import { Mic, MicOff } from 'lucide-react';
+import type { MeterCalib } from '@/audio/AudioMeter';
 
 interface MicGaugeProps {
   rms: number;
   dbfs: number;
+  normalizedRms: number;
+  calibration?: MeterCalib;
   muted: boolean;
-  threshold?: number;
   className?: string;
 }
 
 export const MicGauge = ({ 
   rms, 
   dbfs, 
+  normalizedRms,
+  calibration,
   muted, 
-  threshold = 0.08, 
   className 
 }: MicGaugeProps) => {
+  const threshold = calibration?.minRms || 0.02;
+  
   // Determine color based on RMS level and threshold
   const getColor = () => {
     if (muted) return 'text-muted-foreground';
@@ -25,8 +30,8 @@ export const MicGauge = ({
     return 'text-destructive';
   };
 
-  // Calculate ring radius based on RMS (20px base + up to 20px growth)
-  const ringRadius = 20 + (rms * 20);
+  // Calculate ring radius based on normalized RMS (20px base + up to 20px growth)
+  const ringRadius = 20 + (normalizedRms * 20);
 
   return (
     <div className={cn("relative flex flex-col items-center gap-2", className)}>
@@ -54,10 +59,10 @@ export const MicGauge = ({
               cy="40"
               r={ringRadius}
               fill="none"
-              stroke={`hsl(var(--${rms >= threshold ? 'nature' : 'destructive'}))`}
+              stroke={`hsl(var(--${normalizedRms >= 0.25 ? 'nature' : normalizedRms >= 0.15 ? 'warning' : 'destructive'}))`}
               strokeWidth="3"
               strokeLinecap="round"
-              opacity={0.6 + (rms * 0.4)}
+              opacity={0.6 + (normalizedRms * 0.4)}
               className="transition-all duration-150"
             />
           )}
@@ -76,18 +81,20 @@ export const MicGauge = ({
       {/* Readings */}
       <div className="text-center">
         <div className={cn("text-sm font-mono font-semibold", getColor())}>
-          {muted ? '---' : `${(rms * 100).toFixed(0)}%`}
+          {muted ? '---' : `${(normalizedRms * 100).toFixed(0)}%`}
         </div>
         <div className={cn("text-xs font-mono opacity-70", getColor())}>
           {muted ? '--- dBFS' : `${Math.round(dbfs)} dBFS`}
         </div>
       </div>
 
-      {/* Threshold indicator */}
-      <div className="flex items-center gap-1 text-xs text-muted-foreground">
-        <div className="w-2 h-2 rounded-full bg-muted" />
-        <span>Threshold: {(threshold * 100).toFixed(0)}%</span>
-      </div>
+      {/* Calibration info */}
+      {calibration?.calibrated && (
+        <div className="text-center text-xs text-muted-foreground">
+          <div>Floor: {(calibration.noiseFloor * 100).toFixed(1)}%</div>
+          <div>Peak: {(calibration.peakRms * 100).toFixed(1)}%</div>
+        </div>
+      )}
     </div>
   );
 };

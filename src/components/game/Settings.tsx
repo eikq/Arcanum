@@ -172,6 +172,92 @@ export const Settings = ({ settings, onSettingsChange, onBack }: SettingsProps) 
                 </p>
               </div>
 
+              <div className="space-y-2">
+                <Label>Microphone Sensitivity: {Math.round(settings.micSensitivity * 100)}%</Label>
+                <Slider
+                  value={[settings.micSensitivity]}
+                  onValueChange={([value]) => onSettingsChange({ micSensitivity: value })}
+                  min={0.01}
+                  max={0.10}
+                  step={0.005}
+                  className="w-full"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Lower = easier to cast on quiet microphones
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <Label>Pronunciation Leniency: {Math.round(settings.minAccuracy * 100)}%</Label>
+                <Slider
+                  value={[settings.minAccuracy]}
+                  onValueChange={([value]) => onSettingsChange({ minAccuracy: value })}
+                  min={0.10}
+                  max={0.70}
+                  step={0.05}
+                  className="w-full"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Lower = accepts poorer pronunciation
+                </p>
+              </div>
+
+              <div className="flex items-center justify-between">
+                <div className="space-y-0.5">
+                  <Label htmlFor="always-cast">Always Cast (Assist Mode)</Label>
+                  <p className="text-xs text-muted-foreground">
+                    Cast a reduced-power fallback even if recognition is poor
+                  </p>
+                </div>
+                <Switch
+                  id="always-cast"
+                  checked={settings.alwaysCast}
+                  onCheckedChange={(checked) => onSettingsChange({ alwaysCast: checked })}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Microphone Sensitivity: {Math.round(settings.micSensitivity * 100)}%</Label>
+                <Slider
+                  value={[settings.micSensitivity]}
+                  onValueChange={([value]) => onSettingsChange({ micSensitivity: value })}
+                  min={0.01}
+                  max={0.10}
+                  step={0.005}
+                  className="w-full"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Lower = easier to cast on quiet microphones
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <Label>Pronunciation Leniency: {Math.round(settings.minAccuracy * 100)}%</Label>
+                <Slider
+                  value={[settings.minAccuracy]}
+                  onValueChange={([value]) => onSettingsChange({ minAccuracy: value })}
+                  min={0.10}
+                  max={0.70}
+                  step={0.05}
+                  className="w-full"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Lower = accepts poorer pronunciation
+                </p>
+              </div>
+
+              <div className="flex items-center justify-between">
+                <div className="space-y-0.5">
+                  <Label htmlFor="always-cast">Always Cast (Assist Mode)</Label>
+                  <p className="text-xs text-muted-foreground">
+                    Cast a reduced-power fallback even if recognition is poor
+                  </p>
+                </div>
+                <Switch
+                  id="always-cast"
+                  checked={settings.alwaysCast}
+                  onCheckedChange={(checked) => onSettingsChange({ alwaysCast: checked })}
+                />
+              </div>
               <div className="flex items-center justify-between">
                 <div className="space-y-0.5">
                   <Label htmlFor="hotword">Hotword Activation</Label>
@@ -342,6 +428,9 @@ export const Settings = ({ settings, onSettingsChange, onBack }: SettingsProps) 
                 sensitivity: 0.6,
                 hotwordEnabled: false,
                 ipSafeMode: false,
+                minAccuracy: 0.25,
+                alwaysCast: true,
+                micSensitivity: 0.02,
                 masterVolume: 0.8,
                 sfxVolume: 0.8,
                 musicVolume: 0.6,

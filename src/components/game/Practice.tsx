@@ -30,6 +30,8 @@ export const Practice = ({ onBack, isIPSafe }: PracticeProps) => {
     accuracy: number;
     power: number;
     timestamp: number;
+    matched: boolean;
+    assist: boolean;
   } | null>(null);
   const [practiceStats, setPracticeStats] = useState({
     totalCasts: 0,
@@ -46,7 +48,7 @@ export const Practice = ({ onBack, isIPSafe }: PracticeProps) => {
   const [lastTranscript, setLastTranscript] = useState('');
   const [lastCastTime, setLastCastTime] = useState(0);
   const [cooldownMs] = useState(1000);
-  const [minRms] = useState(0.08);
+  const [audioMeter, setAudioMeter] = useState<any>(null);
   const [hotwordEnabled] = useState(false);
   const [hotword] = useState('arcanum');
   const [showDebug, setShowDebug] = useState(false);
@@ -55,6 +57,18 @@ export const Practice = ({ onBack, isIPSafe }: PracticeProps) => {
 
   const { toast } = useToast();
 
+  // Initialize audio meter
+  useEffect(() => {
+    import('@/audio/AudioMeter').then(({ AudioMeter }) => {
+      const meter = new AudioMeter();
+      meter.start();
+      setAudioMeter(meter);
+      
+      return () => {
+        meter.destroy();
+      };
+    });
+  }, []);
   // Enhanced interim callback for live spell guesses
   const handleInterim = useCallback((transcript: string) => {
     if (!transcript.trim()) {
@@ -63,7 +77,7 @@ export const Practice = ({ onBack, isIPSafe }: PracticeProps) => {
     }
 
     // Lightweight matching for real-time preview
-    const matches = findSpellMatches(transcript, 0.3, 3);
+    const matches = findSpellMatches(transcript, 0.2, 3);
     setTopGuesses(matches.map(match => ({
       spellId: match.spell.id,
       name: match.spell.name,
@@ -76,6 +90,8 @@ export const Practice = ({ onBack, isIPSafe }: PracticeProps) => {
     if (!transcript.trim()) return;
 
     const now = performance.now();
+    const calibration = audioMeter?.getCalibration();
+    const normalizedRms = audioMeter?.normalizedRms(voiceState.loudness) || 0;
     
     // Apply cast gating
     const gateResult = canCastGate({
@@ -86,7 +102,10 @@ export const Practice = ({ onBack, isIPSafe }: PracticeProps) => {
       lastCastTs: lastCastTime,
       cooldownMs,
       lastTranscript,
-      minRms,
+      minRms: calibration?.minRms || 0.02,
+      normalized: normalizedRms,
+      minAccuracy: 0.25, // Use settings value in real implementation
+      alwaysCast: true, // Use settings value in real implementation
       hotwordEnabled,
       hotword
     });
@@ -94,11 +113,15 @@ export const Practice = ({ onBack, isIPSafe }: PracticeProps) => {
     if (!gateResult.ok) {
       setBlockReason(gateResult.reason);
       setBlockDetails(gateResult.details);
-      toast({
-        title: "Cast Blocked",
-        description: gateResult.details || gateResult.reason,
-        variant: "destructive"
-      });
+      
+      // Only show toast for cooldown/duplicate, not volume issues
+      if (gateResult.reason === "ON_COOLDOWN" || gateResult.reason === "DUPLICATE") {
+        toast({
+          title: "Cast Blocked",
+          description: gateResult.details || gateResult.reason,
+          variant: "destructive"
+        });
+      }
       return;
     }
 
@@ -106,46 +129,44 @@ export const Practice = ({ onBack, isIPSafe }: PracticeProps) => {
     setBlockReason(undefined);
     setBlockDetails(undefined);
 
-    // Find best spell match
-    const matches = findSpellMatches(transcript, 0.4, 1);
+    // Use match or fallback system
+    const result = matchOrFallback(transcript, { minScore: 0.25 });
+    const power = calculateSpellPower(result.score, voiceState.loudness, normalizedRms, result.matched);
     
-    if (matches.length > 0) {
-      const bestMatch = matches[0];
-      const power = calculateSpellPower(bestMatch.accuracy, voiceState.loudness);
+    if (power > 0) {
+      setLastCastResult({
+        spell: result.spell,
+        accuracy: result.score,
+        power,
+        timestamp: now,
+        matched: result.matched,
+        assist: gateResult.assist || false
+      });
+
+      // Update stats
+      setPracticeStats(prev => ({
+        totalCasts: prev.totalCasts + 1,
+        averageAccuracy: (prev.averageAccuracy * prev.totalCasts + result.score) / (prev.totalCasts + 1),
+        bestAccuracy: Math.max(prev.bestAccuracy, result.score)
+      }));
+
+      // Mark cast time
+      markCast();
+      setLastCastTime(now);
+      setLastTranscript(transcript);
+
+      const toastTitle = result.matched ? "Spell Cast!" : "Assist Cast!";
+      const toastDesc = result.matched 
+        ? `${result.spell.name} - ${Math.round(result.score * 100)}% accuracy`
+        : `${result.spell.name} (fallback) - ${Math.round(power * 100)}% power`;
       
-      if (power > 0) {
-        setLastCastResult({
-          spell: bestMatch.spell,
-          accuracy: bestMatch.accuracy,
-          power,
-          timestamp: now
-        });
-
-        // Update stats
-        setPracticeStats(prev => ({
-          totalCasts: prev.totalCasts + 1,
-          averageAccuracy: (prev.averageAccuracy * prev.totalCasts + bestMatch.accuracy) / (prev.totalCasts + 1),
-          bestAccuracy: Math.max(prev.bestAccuracy, bestMatch.accuracy)
-        }));
-
-        // Mark cast time
-        markCast();
-        setLastCastTime(now);
-        setLastTranscript(transcript);
-
-        toast({
-          title: "Spell Cast!",
-          description: `${bestMatch.spell.name} - ${Math.round(bestMatch.accuracy * 100)}% accuracy`,
-        });
-      }
-    } else {
       toast({
-        title: "No Spell Match",
-        description: "Try speaking more clearly or check the spell list",
-        variant: "destructive"
+        title: toastTitle,
+        description: toastDesc,
+        variant: result.matched ? "default" : "secondary"
       });
     }
-  }, [lastCastTime, cooldownMs, lastTranscript, minRms, hotwordEnabled, hotword, toast]);
+  }, [lastCastTime, cooldownMs, lastTranscript, hotwordEnabled, hotword, toast, audioMeter, voiceState.loudness]);
 
   // Initialize voice recognition
   const voiceState = useVoiceRecognition(
@@ -197,12 +218,14 @@ export const Practice = ({ onBack, isIPSafe }: PracticeProps) => {
     srError: voiceState.error,
     rms: voiceState.rms(),
     dbfs: voiceState.dbfs,
+    normalizedRms: audioMeter?.normalizedRms(voiceState.rms()) || 0,
+    calibration: audioMeter?.getCalibration() || { noiseFloor: 0, peakRms: 0, minRms: 0.02, rmsMargin: 0.01, calibrated: false },
     interim: voiceState.interim,
     final: voiceState.final,
     topGuesses: topGuesses.map(g => ({ spellId: g.spellId, name: g.name, score: g.score })),
     gateFlags: {
       isFinal: !!voiceState.final,
-      rmsOK: voiceState.rms() >= minRms,
+      rmsOK: voiceState.rms() >= (audioMeter?.getCalibration().minRms || 0.02),
       cooldownOK: canCast(cooldownMs),
       notDuplicate: voiceState.final !== lastTranscript,
       hotwordOK: !hotwordEnabled || (voiceState.final?.toLowerCase().startsWith(hotword.toLowerCase()) ?? false)
@@ -265,8 +288,9 @@ export const Practice = ({ onBack, isIPSafe }: PracticeProps) => {
               <MicGauge
                 rms={voiceState.loudness}
                 dbfs={voiceState.dbfs}
+                normalizedRms={audioMeter?.normalizedRms(voiceState.loudness) || 0}
+                calibration={audioMeter?.getCalibration()}
                 muted={!voiceState.isListening}
-                threshold={minRms}
               />
               
               {/* Live Transcript & Guesses */}
@@ -351,9 +375,19 @@ export const Practice = ({ onBack, isIPSafe }: PracticeProps) => {
               <div className="p-4 bg-muted/50 rounded-lg">
                 <div className="flex items-center justify-between mb-2">
                   <h4 className="font-semibold">Last Cast Result</h4>
-                  <Badge variant={lastCastResult.accuracy > 0.8 ? 'default' : 'outline'}>
-                    {Math.round(lastCastResult.accuracy * 100)}% accuracy
-                  </Badge>
+                  <div className="flex gap-2">
+                    <Badge variant={lastCastResult.matched ? 'default' : 'secondary'}>
+                      {lastCastResult.matched ? 'Matched' : 'Fallback'}
+                    </Badge>
+                    <Badge variant={lastCastResult.accuracy > 0.8 ? 'default' : 'outline'}>
+                      {Math.round(lastCastResult.accuracy * 100)}% accuracy
+                    </Badge>
+                    {lastCastResult.assist && (
+                      <Badge variant="outline" className="text-warning">
+                        Assist
+                      </Badge>
+                    )}
+                  </div>
                 </div>
                 <div className="flex items-center gap-4">
                   <span className="text-2xl">{lastCastResult.spell.icon}</span>
@@ -365,7 +399,11 @@ export const Practice = ({ onBack, isIPSafe }: PracticeProps) => {
                   </div>
                   <div className="w-24 h-2 bg-muted rounded-full overflow-hidden">
                     <div 
-                      className="h-full bg-gradient-to-r from-fire via-light to-nature transition-all duration-500"
+                      className={`h-full transition-all duration-500 ${
+                        lastCastResult.matched 
+                          ? 'bg-gradient-to-r from-fire via-light to-nature'
+                          : 'bg-gradient-to-r from-muted-foreground to-secondary'
+                      }`}
                       style={{ width: `${lastCastResult.power * 100}%` }}
                     />
                   </div>
