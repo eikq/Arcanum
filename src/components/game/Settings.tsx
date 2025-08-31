@@ -215,49 +215,7 @@ export const Settings = ({ settings, onSettingsChange, onBack }: SettingsProps) 
                   onCheckedChange={(checked) => onSettingsChange({ alwaysCast: checked })}
                 />
               </div>
-              <div className="space-y-2">
-                <Label>Microphone Sensitivity: {Math.round(settings.micSensitivity * 100)}%</Label>
-                <Slider
-                  value={[settings.micSensitivity]}
-                  onValueChange={([value]) => onSettingsChange({ micSensitivity: value })}
-                  min={0.01}
-                  max={0.10}
-                  step={0.005}
-                  className="w-full"
-                />
-                <p className="text-xs text-muted-foreground">
-                  Lower = easier to cast on quiet microphones
-                </p>
-              </div>
 
-              <div className="space-y-2">
-                <Label>Pronunciation Leniency: {Math.round(settings.minAccuracy * 100)}%</Label>
-                <Slider
-                  value={[settings.minAccuracy]}
-                  onValueChange={([value]) => onSettingsChange({ minAccuracy: value })}
-                  min={0.10}
-                  max={0.70}
-                  step={0.05}
-                  className="w-full"
-                />
-                <p className="text-xs text-muted-foreground">
-                  Lower = accepts poorer pronunciation
-                </p>
-              </div>
-
-              <div className="flex items-center justify-between">
-                <div className="space-y-0.5">
-                  <Label htmlFor="always-cast">Always Cast (Assist Mode)</Label>
-                  <p className="text-xs text-muted-foreground">
-                    Cast a reduced-power fallback even if recognition is poor
-                  </p>
-                </div>
-                <Switch
-                  id="always-cast"
-                  checked={settings.alwaysCast}
-                  onCheckedChange={(checked) => onSettingsChange({ alwaysCast: checked })}
-                />
-              </div>
               <div className="flex items-center justify-between">
                 <div className="space-y-0.5">
                   <Label htmlFor="hotword">Hotword Activation</Label>

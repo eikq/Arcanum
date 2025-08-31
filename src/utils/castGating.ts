@@ -12,9 +12,6 @@ export interface CastGateParams {
   normalized: number;
   minAccuracy: number;
   alwaysCast: boolean;
-  normalized: number;
-  minAccuracy: number;
-  alwaysCast: boolean;
   hotwordEnabled: boolean;
   hotword: string;
 }
@@ -23,7 +20,6 @@ export interface CastGateResult {
   ok: boolean;
   reason?: string;
   details?: string;
-  assist?: boolean;
   assist?: boolean;
 }
 
@@ -37,9 +33,6 @@ export function canCastGate(params: CastGateParams): CastGateResult {
     cooldownMs,
     lastTranscript,
     minRms,
-    normalized,
-    minAccuracy,
-    alwaysCast,
     normalized,
     minAccuracy,
     alwaysCast,
@@ -76,13 +69,20 @@ export function canCastGate(params: CastGateParams): CastGateResult {
         reason: "HOTWORD_MISSING",
         details: `Must start with "${hotword}"`
       };
-      reason: "ON_COOLDOWN",
-      details: `${Math.ceil(remainingMs)}ms remaining`
     }
   }
 
   // Check cooldown (always enforced)
   const timeSinceLastCast = now - lastCastTs;
+  if (timeSinceLastCast < cooldownMs) {
+    const remainingMs = cooldownMs - timeSinceLastCast;
+    return {
+      ok: false,
+      reason: "ON_COOLDOWN",
+      details: `${Math.ceil(remainingMs)}ms remaining`
+    };
+  }
+
   // Check for duplicate transcript (within 500ms)
   if (finalTranscript && finalTranscript === lastTranscript && timeSinceLastCast < 500) {
     return {
@@ -100,27 +100,6 @@ export function canCastGate(params: CastGateParams): CastGateResult {
       ok: false,
       reason: "LOW_VOLUME",
       details: `RMS ${(rms * 100).toFixed(1)}%, normalized ${(normalized * 100).toFixed(1)}%`
-    };
-  }
-
-  // Lenient volume check: pass if raw RMS >= minRms OR normalized >= 0.25
-  const volumeOk = rms >= minRms || normalized >= 0.25;
-  
-  if (!volumeOk && !alwaysCast) {
-    return {
-      ok: false,
-      reason: "LOW_VOLUME",
-      details: `RMS ${(rms * 100).toFixed(1)}%, normalized ${(normalized * 100).toFixed(1)}%`
-    };
-  }
-
-  // If volume failed but always-cast is enabled, allow with assist mode
-  if (!volumeOk && alwaysCast) {
-    return {
-      ok: true,
-      reason: "ASSIST_MODE",
-      details: "Always-cast enabled (reduced power)",
-      assist: true
     };
   }
 

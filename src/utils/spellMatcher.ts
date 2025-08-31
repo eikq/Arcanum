@@ -27,26 +27,6 @@ interface MatchResult {
   score: number;
   matched: boolean;
 }
-// Fallback spell for when no good match is found
-const ARCANE_BURST: Spell = {
-  id: 'arcane_burst',
-  name: 'Arcane Burst',
-  element: 'arcane',
-  difficulty: 'easy',
-  type: 'attack',
-  aliases: ['burst', 'blast', 'magic'],
-  phonemes: ['AA R K EY N B ER S T'],
-  icon: '✨',
-  damage: 25,
-  manaCost: 15,
-  cooldown: 1000
-};
-
-interface MatchResult {
-  spell: Spell;
-  score: number;
-  matched: boolean;
-}
 
 // Phonetic similarity using simplified Levenshtein distance
 function calculatePhoneticSimilarity(input: string, target: string): number {
@@ -184,36 +164,12 @@ export function matchOrFallback(
     matched: false
   };
 }
-// Match or fallback - always returns a spell to cast
-export function matchOrFallback(
-  transcript: string, 
-  opts?: { minScore?: number }
-): MatchResult {
-  const minScore = opts?.minScore ?? 0.25;
-  const matches = findSpellMatches(transcript, 0.1, 1); // Very low threshold to find anything
-  
-  if (matches.length > 0 && matches[0].accuracy >= minScore) {
-    return {
-      spell: matches[0].spell,
-      score: matches[0].accuracy,
-      matched: true
-    };
-  }
-  
-  // Return fallback spell
-  return {
-    spell: ARCANE_BURST,
-    score: matches.length > 0 ? matches[0].accuracy : 0.1,
-    matched: false
-  };
-}
 
 // Calculate spell power based on accuracy and loudness
 export function calculateSpellPower(
   accuracy: number, 
   loudness: number, 
   normalizedRms: number,
-  matched: boolean = true
   matched: boolean = true
 ): number {
   // New power formula: 60% accuracy + 40% normalized RMS
