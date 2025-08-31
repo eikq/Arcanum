@@ -23,7 +23,7 @@ export class NetClient {
   public currentRoom: RoomID | null = null;
   private listeners: Map<keyof NetClientEvents, Function[]> = new Map();
 
-  constructor(private serverUrl = 'ws://localhost:3001') {}
+  constructor(private serverUrl = 'ws://localhost:5175') {}
 
   // FIX: Explicit connection management with state tracking
   connect(): Promise<void> {
