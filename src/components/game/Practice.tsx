@@ -8,7 +8,7 @@ import { useVoiceRecognition } from '@/hooks/useVoiceRecognition';
 import { VoiceIndicator } from './VoiceIndicator';
 import { SpellCard } from './SpellCard';
 import { MicGauge } from '@/components/ui/mic-gauge';
-import { CastDebugPanel, CastDebugState } from '@/components/ui/cast-debug-panel';
+import { DiagnosticOverlay, DiagnosticState } from '@/components/ui/diagnostic-overlay';
 import { CooldownRing } from '@/components/ui/cooldown-ring';
 import { findSpellMatches, calculateSpellPower } from '@/utils/spellMatcher';
 import { canCastGate, canCast, markCast, getRemainingCooldown } from '@/utils/castGating';
@@ -183,29 +183,34 @@ export const Practice = ({ onBack, isIPSafe }: PracticeProps) => {
   }, [showDebug]);
 
   // Build debug state
-  const debugState: CastDebugState = {
+  const debugState: DiagnosticState = {
+    audioContextState: 'running',
+    sampleRate: 48000,
+    micPermission: voiceState.hasPermission ? 'granted' : 'denied',
+    secureOrigin: location.protocol === 'https:' || location.hostname === 'localhost',
+    trackEnabled: true,
+    trackMuted: false,
+    trackReadyState: 'live',
     srSupported: voiceState.supported,
-    srListening: voiceState.isListening,
+    srListening: voiceState.listening,
     srError: voiceState.error,
-    srLanguage: 'en-US',
-    rms: voiceState.loudness,
+    rms: voiceState.rms(),
     dbfs: voiceState.dbfs,
-    interim: voiceState.interim || '',
-    final: voiceState.final || '',
-    topGuesses,
-    eligibility: {
-      finalOK: !!voiceState.final,
-      rmsOK: voiceState.loudness >= minRms,
+    interim: voiceState.interim,
+    final: voiceState.final,
+    topGuesses: topGuesses.map(g => ({ spellId: g.spellId, name: g.name, score: g.score })),
+    gateFlags: {
+      isFinal: !!voiceState.final,
+      rmsOK: voiceState.rms() >= minRms,
       cooldownOK: canCast(cooldownMs),
       notDuplicate: voiceState.final !== lastTranscript,
       hotwordOK: !hotwordEnabled || (voiceState.final?.toLowerCase().startsWith(hotword.toLowerCase()) ?? false)
     },
     blockReason,
     blockDetails,
-    hotwordEnabled,
-    hotword,
-    minRms,
-    cooldownMs
+    connectionState: 'disconnected',
+    serverOffset: 0,
+    fps: 60
   };
 
   // Filter spells based on selection
@@ -369,10 +374,13 @@ export const Practice = ({ onBack, isIPSafe }: PracticeProps) => {
           </CardContent>
         </Card>
 
-        {/* Debug Panel */}
-        {showDebug && (
-          <CastDebugPanel state={debugState} className="mb-8" />
-        )}
+      {/* Diagnostic Overlay */}
+      <DiagnosticOverlay
+        isOpen={showDebug}
+        onClose={() => setShowDebug(false)}
+        state={debugState}
+        onRetryMic={() => voiceState.primeMic()}
+      />
 
         {/* Practice Stats */}
         <Card className="mb-8">

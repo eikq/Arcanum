@@ -8,7 +8,7 @@ export interface AudioMeterState {
 export type AudioMeterCallback = (state: AudioMeterState) => void;
 
 export class AudioMeter {
-  private audioContext: AudioContext | null = null;
+  public audioContext: AudioContext | null = null;
   private analyser: AnalyserNode | null = null;
   private sourceNode: MediaStreamAudioSourceNode | null = null;
   private compressor: DynamicsCompressorNode | null = null;
@@ -115,7 +115,7 @@ export class AudioMeter {
 
   private rmsToDbfs(rms: number): number {
     // Convert RMS to dBFS, with floor at -60 dB
-    return 20 * Math.log10(Math.max(rms, 1e-6));
+    return 20 * Math.log10(Math.max(rms, 1e-8));
   }
 
   subscribe(callback: AudioMeterCallback): () => void {
@@ -131,7 +131,7 @@ export class AudioMeter {
     return this.rmsToDbfs(this.smoothedRms);
   }
 
-  cleanup(): void {
+  destroy(): void {
     this.stop();
     
     if (this.sourceNode) {
