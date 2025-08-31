@@ -186,6 +186,7 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
         variant: "destructive",
       });
     }
+  }, [voiceRecognition]);
 
   // Initialize systems
   useEffect(() => {
@@ -534,8 +535,9 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
         }
       }
       return newPaused;
-
+    });
   }, [gameState, voiceRecognition, handleOpponentCast]);
+  
   const handlePlayAgain = useCallback(() => {
     console.log('🔄 Starting match restart...');
     
@@ -732,7 +734,7 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
                   dbfs={audioMeterRef.current?.getDbfs() || -60}
                   normalizedRms={audioMeterRef.current?.normalizedRms(audioMeterRef.current?.getRms() || 0) || 0}
                   calibration={audioMeterRef.current?.getCalibration()}
-                  muted={!isListening}
+                  muted={!voiceRecognition.isListening}
                 />
               </CooldownRing>
             </div>
