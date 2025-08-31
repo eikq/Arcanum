@@ -136,6 +136,7 @@ export class SoundManager {
         console.log(`🎵 Loading sound: ${id}`);
         const howl = new Howl({
           src: [dataUri],
+          format: ['wav'],
           volume: this.sfxVolume * this.masterVolume,
           preload: true,
           onload: () => console.log(`✅ Sound loaded: ${id}`),
@@ -160,6 +161,7 @@ export class SoundManager {
         console.log(`🎵 Loading music: ${id}`);
         const howl = new Howl({
           src: [dataUri],
+          format: ['wav'],
           volume: this.musicVolume * this.masterVolume,
           loop: true,
           preload: true,
@@ -222,7 +224,8 @@ export class SoundManager {
     } else {
       console.warn(`⚠️ Sound not found: ${soundId}`);
       // Fallback to procedural sound
-      this.playProceduralSound(id === 'click' ? 800 : id === 'error' ? 200 : 600, 0.1);
+      const frequency = id === 'click' ? 800 : id === 'error' ? 200 : id === 'back' ? 600 : 500;
+      this.playProceduralSound(frequency, 0.1);
     }
   }
 
@@ -421,18 +424,6 @@ export class SoundManager {
   }
 
   // UI sounds
-  playUI(type: 'click' | 'hover' | 'error'): void {
-    if (!this.isInitialized) return;
-
-    const soundId = `ui_${type}`;
-    const sound = this.sounds.get(soundId);
-    if (sound) {
-      sound.volume(this.sfxVolume * this.masterVolume * 0.5);
-      sound.play();
-    }
-  }
-
-  // Music control
   playMusic(trackId: string, fadeIn: number = 1000): void {
     console.log(`🎵 playMusic called: ${trackId}`);
     

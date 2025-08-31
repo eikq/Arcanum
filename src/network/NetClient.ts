@@ -61,8 +61,12 @@ export class NetClient {
       try {
         this.socket = io(this.serverUrl, {
           transports: ['websocket'],
-          timeout: 10000,
+          timeout: 20000,
           forceNew: true,
+          autoConnect: true,
+          reconnection: true,
+          reconnectionAttempts: 5,
+          reconnectionDelay: 1000,
         });
 
         this.socket.on('connect', () => {
@@ -78,7 +82,8 @@ export class NetClient {
           console.log('Attempted URL:', this.serverUrl);
           this.connectionState = 'disconnected';
           this.emit('connection_changed', this.connectionState);
-          reject(error);
+          // Don't reject - let socket.io handle reconnection attempts
+          console.log('🔄 Will attempt reconnection automatically...');
         });
 
         this.socket.on('disconnect', () => {
@@ -86,6 +91,19 @@ export class NetClient {
           this.connectionState = 'disconnected';
           this.emit('connection_changed', this.connectionState);
           this.stopHeartbeat();
+        });
+
+        this.socket.on('reconnect', () => {
+          console.log('🔄 Reconnected to game server');
+          this.connectionState = 'connected';
+          this.emit('connection_changed', this.connectionState);
+          this.startHeartbeat();
+        });
+
+        this.socket.on('reconnect_error', (error) => {
+          console.error('❌ Reconnection failed:', error);
+          this.connectionState = 'disconnected';
+          this.emit('connection_changed', this.connectionState);
         });
 
         // FIX: Handle new server events
@@ -105,6 +123,10 @@ export class NetClient {
         this.socket.on('opponent:left', (data) => {
           this.emit('opponent_left', data);
         });
+
+        // Resolve immediately after setting up listeners
+        // Connection success/failure will be handled via events
+        setTimeout(() => resolve(), 100);
 
       } catch (error) {
         this.connectionState = 'disconnected';
