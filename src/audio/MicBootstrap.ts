@@ -121,17 +121,25 @@ class MicBootstrapManager {
   async acquireMic(preferredDeviceId?: string): Promise<MicState> {
     this.updateState({ ready: "acquiring", error: undefined });
 
+    // Resume AudioContext if suspended
+    if (this.state.context.state === 'suspended') {
+      try {
+        await this.state.context.resume();
+        console.log('AudioContext resumed before mic acquisition');
+      } catch (error) {
+        console.warn('Failed to resume AudioContext:', error);
+      }
+    }
+
     const profiles: Array<{ id: "A"|"B"|"C"|"D", constraints: MediaStreamConstraints }> = [
       {
         id: "A",
         constraints: {
           audio: {
             deviceId: preferredDeviceId ? { exact: preferredDeviceId } : undefined,
-            channelCount: 1,
-            sampleRate: 48000,
             echoCancellation: true,
             noiseSuppression: true,
-            autoGainControl: false
+            autoGainControl: true
           }
         }
       },
@@ -140,11 +148,9 @@ class MicBootstrapManager {
         constraints: {
           audio: {
             deviceId: preferredDeviceId ? { exact: preferredDeviceId } : undefined,
-            channelCount: 1,
-            sampleRate: 48000,
             echoCancellation: true,
-            noiseSuppression: true,
-            autoGainControl: true
+            noiseSuppression: false,
+            autoGainControl: false
           }
         }
       },
@@ -153,8 +159,6 @@ class MicBootstrapManager {
         constraints: {
           audio: {
             deviceId: preferredDeviceId ? { exact: preferredDeviceId } : undefined,
-            channelCount: 1,
-            sampleRate: 44100,
             echoCancellation: false,
             noiseSuppression: false,
             autoGainControl: false
@@ -163,7 +167,9 @@ class MicBootstrapManager {
       },
       {
         id: "D",
-        constraints: { audio: true }
+        constraints: { 
+          audio: preferredDeviceId ? { deviceId: preferredDeviceId } : true 
+        }
       }
     ];
 
@@ -176,8 +182,11 @@ class MicBootstrapManager {
         
         if (!track) {
           stream.getTracks().forEach(t => t.stop());
+          console.log(`Profile ${profile.id}: No audio track found`);
           continue;
         }
+
+        console.log(`Profile ${profile.id}: Got track with settings:`, track.getSettings());
 
         // Connect to audio graph
         if (this.state.source) {
@@ -198,16 +207,16 @@ class MicBootstrapManager {
           error: undefined
         });
 
-        // Test RMS for 500ms
-        const rmsTestPassed = await this.testRmsLevel(500);
+        // Test RMS for 200ms (shorter test)
+        const rmsTestPassed = await this.testRmsLevel(200);
         
-        if (rmsTestPassed && !track.muted) {
+        if (!track.muted) {
           console.log(`Mic profile ${profile.id} successful`);
           this.startWatchdog();
           this.startMeter();
           return this.state;
         } else {
-          console.log(`Mic profile ${profile.id} failed RMS test or muted`);
+          console.log(`Mic profile ${profile.id}: Track is muted`);
           stream.getTracks().forEach(t => t.stop());
           this.updateState({ stream: undefined, track: undefined, source: undefined });
         }
