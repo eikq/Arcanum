@@ -8,6 +8,10 @@ import { VoiceIndicator } from './VoiceIndicator';
 import { useVoiceRecognition } from '@/hooks/useVoiceRecognition';
 import { Caster } from './Caster';
 import { Projectile } from './Projectile';
+// NEW: Import QoL components
+import { StatusStrip } from '@/components/ui/status-strip';
+import { CooldownRing } from '@/components/ui/cooldown-ring';
+import { MicBlockModal } from '@/components/ui/mic-block-modal';
 import { findSpellMatches } from '@/utils/spellMatcher';
 import { SPELL_DATABASE } from '@/data/spells';
 import { SpellElement } from '@/types/game';
@@ -17,7 +21,7 @@ import { createBotOpponent, BotOpponent } from '@/ai/BotOpponent';
 import { netClient } from '@/network/NetClient';
 import { voiceChat } from '@/network/VoiceChat';
 import type { RoomSnapshot, CastPayload } from '@/shared/net';
-import { makeServerTimer } from '@/shared/net';
+import { makeServerTimer, canCast, markCast } from '@/shared/net';
 import { 
   Volume2, VolumeX, Pause, Play, Settings, 
   Mic, MicOff, Shield, Heart, Zap, 
@@ -78,6 +82,9 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
   // Voice and audio
   const [isMuted, setIsMuted] = useState(false);
   const [isVoiceChatMuted, setIsVoiceChatMuted] = useState(true);
+  const [showMicModal, setShowMicModal] = useState(false);
+  const [isSpectating, setIsSpectating] = useState(false);
+  const [micStatus, setMicStatus] = useState<'listening' | 'denied' | 'restarting' | 'disabled'>('disabled');
   
   // NEW: Casting visuals
   const [activeCasts, setActiveCasts] = useState<{
@@ -102,6 +109,16 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
   const voiceRecognition = useVoiceRecognition((transcript, confidence, loudness) => {
     if (gameState !== 'playing' || isPaused || !transcript.trim()) return;
     
+    // FIX: Gate on RMS level
+    if (voiceRecognition.rms() < 0.08) {
+      toast({
+        title: "Volume too low",
+        description: "Speak louder or move closer to the microphone",
+        variant: "default",
+      });
+      return;
+    }
+    
     const matches = findSpellMatches(transcript, settings.sensitivity || 0.6);
     if (matches.length > 0 && confidence > 0.5) {
       const match = matches[0];
@@ -109,8 +126,8 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
       handleCast(match.spell.id, match.accuracy, loudness, power);
     }
   });
-  
-  const { isListening, transcript, confidence, loudness, hasPermission, isSupported } = voiceRecognition;
+
+  const { isListening, transcript, confidence, loudness, hasPermission, isSupported, micDenied, primeMic, rms } = voiceRecognition;
 
   // FIX: Handle network events for online matches
   useEffect(() => {
@@ -158,10 +175,24 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
       setGameState('playing');
       setCountdown(null);
       
-      // Auto-start voice recognition
-      if (voiceRecognition.autoStartListening) {
-        voiceRecognition.autoStartListening();
-      }
+      // FIX: Prime and auto-start voice recognition for online matches
+      const primeMicForOnlineMatch = async () => {
+        try {
+          if (!hasPermission) {
+            await primeMic();
+          }
+          setMicStatus('listening');
+          if (voiceRecognition.autoStartListening) {
+            await voiceRecognition.autoStartListening();
+          }
+        } catch (error) {
+          console.error('Failed to prime mic for online match:', error);
+          setMicStatus('denied');
+          setShowMicModal(true);
+        }
+      };
+      
+      primeMicForOnlineMatch();
       
       const getTimer = makeServerTimer(data.roundEndsAt, () => netClient.getServerOffset());
       
@@ -176,25 +207,30 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
       updateTimer();
     };
 
-    const handleMatchFinished = (data: { roomId: string; winner?: string }) => {
-      setGameState('finished');
-      setWinner(data.winner || null);
-      setRoundTimer(null);
-      
-      // FIX: Stop voice recognition and voice chat
-      voiceRecognition.stopListening();
-      voiceChat.disconnect();
-      
-      // Stop bot if running
-      if (botOpponentRef.current) {
-        botOpponentRef.current.stop();
-      }
-      
-      soundManager.stopMusic();
-      if (data.winner === netClient.currentRoom) {
-        soundManager.playMusic('victory');
-      }
-    };
+  const handleMatchFinished = (data: { roomId: string; winner?: string }) => {
+    setGameState('finished');
+    setWinner(data.winner || null);
+    setRoundTimer(null);
+    
+    // FIX: Stop voice recognition and voice chat properly
+    voiceRecognition.stopListening();
+    voiceChat.disconnect();
+    setMicStatus('disabled');
+    
+    // Stop bot if running
+    if (botOpponentRef.current) {
+      botOpponentRef.current.stop();
+    }
+    
+    // Clear any active projectiles and effects
+    setActiveProjectiles([]);
+    setActiveCasts({});
+    
+    soundManager.stopMusic();
+    if (data.winner === netClient.currentRoom) {
+      soundManager.playMusic('victory');
+    }
+  };
 
     const handleNetworkCast = (cast: CastPayload & { from: string }) => {
       // Only handle casts from other players
@@ -217,14 +253,29 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
       netClient.off('room_updated', handleRoomUpdate);
       netClient.off('cast_received', handleNetworkCast);
     };
-  }, [mode, gameState, voiceRecognition.autoStartListening, voiceRecognition.stopListening]);
+  }, [mode, gameState, voiceRecognition.autoStartListening, voiceRecognition.stopListening, hasPermission, primeMic]);
 
   // FIX: Auto-start voice recognition for bot matches
   useEffect(() => {
-    if (mode === 'bot' && gameState === 'playing' && voiceRecognition.autoStartListening) {
-      voiceRecognition.autoStartListening();
+    if (mode === 'bot' && gameState === 'playing') {
+      // Prime and start microphone for bot matches
+      const primeMicForMatch = async () => {
+        try {
+          await primeMic();
+          setMicStatus('listening');
+          if (voiceRecognition.autoStartListening) {
+            await voiceRecognition.autoStartListening();
+          }
+        } catch (error) {
+          console.error('Failed to prime mic for bot match:', error);
+          setMicStatus('denied');
+          setShowMicModal(true);
+        }
+      };
+      
+      primeMicForMatch();
     }
-  }, [mode, gameState, voiceRecognition.autoStartListening]);
+  }, [mode, gameState, primeMic, voiceRecognition.autoStartListening]);
 
   // Initialize systems
   useEffect(() => {
@@ -337,10 +388,41 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
     const now = performance.now();
     
     // FIX: Only allow casts during playing state
-    if (gameState !== 'playing') return;
+    if (gameState !== 'playing') {
+      toast({
+        title: "Cannot cast",
+        description: "Spells can only be cast during active gameplay",
+        variant: "default",
+      });
+      return;
+    }
     
-    // Check global cooldown
-    if (globalCooldown) {
+    // FIX: Gate on mic status and spectating
+    if (isSpectating) {
+      toast({
+        title: "Spectating",
+        description: "You're in spectate mode - cannot cast spells",
+        variant: "default",
+      });
+      return;
+    }
+    
+    if (!isListening || micDenied) {
+      toast({
+        title: "Microphone required",
+        description: "Enable microphone access to cast spells",
+        variant: "default",
+      });
+      return;
+    }
+    
+    // FIX: Use shared cooldown validation
+    if (!canCast()) {
+      toast({
+        title: "Cooldown active",
+        description: "Wait before casting another spell",
+        variant: "default",
+      });
       return;
     }
     
@@ -352,6 +434,9 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
     if (now - spellLastCast < spellCooldown) {
       return;
     }
+    
+    // FIX: Mark cast for shared cooldown tracking
+    markCast();
     
     // Perform cast
     const castData = {
@@ -451,7 +536,55 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
       }
     }
     
-  }, [globalCooldown, spellCooldowns, lastCastTime, mode, roomId]);
+  }, [globalCooldown, spellCooldowns, lastCastTime, mode, roomId, gameState, isSpectating, isListening, micDenied]);
+
+  // FIX: Mic modal handlers
+  const handleMicRetry = useCallback(async () => {
+    try {
+      await primeMic();
+      setMicStatus('listening');
+      setShowMicModal(false);
+      if (voiceRecognition.autoStartListening) {
+        await voiceRecognition.autoStartListening();
+      }
+    } catch (error) {
+      console.error('Mic retry failed:', error);
+      toast({
+        title: "Microphone Failed",
+        description: "Unable to access microphone. Try refreshing the page.",
+        variant: "destructive",
+      });
+    }
+  }, [primeMic, voiceRecognition.autoStartListening]);
+
+  const handleSpectateMode = useCallback(() => {
+    setIsSpectating(true);
+    setShowMicModal(false);
+    setMicStatus('disabled');
+    toast({
+      title: "Spectate Mode",
+      description: "You're now spectating - cannot cast spells",
+      variant: "default",
+    });
+  }, []);
+
+  const handleMicCancel = useCallback(() => {
+    setShowMicModal(false);
+    onBack();
+  }, [onBack]);
+
+  // FIX: Track mic status changes
+  useEffect(() => {
+    if (isListening) {
+      setMicStatus('listening');
+    } else if (micDenied) {
+      setMicStatus('denied');
+    } else if (hasPermission && !isListening) {
+      setMicStatus('restarting');
+    } else {
+      setMicStatus('disabled');
+    }
+  }, [isListening, micDenied, hasPermission]);
 
   // Handle opponent cast
   const handleOpponentCast = useCallback((castData: any) => {
@@ -850,19 +983,34 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
         </div>
       </div>
 
-      {/* Voice Indicator */}
+      {/* NEW: Status Strip */}
       <div className="fixed bottom-4 left-4 z-20">
-        <VoiceIndicator
-          voiceState={{
-            isListening,
-            isSupported,
-            hasPermission,
-            transcript,
-            confidence,
-            loudness
-          }}
-          onToggle={voiceRecognition.toggle}
+        <StatusStrip
+          micStatus={micStatus}
+          connectionStatus={mode === 'bot' ? 'connected' : (netClient.isConnected() ? 'connected' : 'disconnected')}
+          rmsLevel={rms()}
         />
+      </div>
+
+      {/* Voice Indicator (moved right) */}
+      <div className="fixed bottom-4 left-80 z-20">
+        <CooldownRing
+          isActive={globalCooldown}
+          cooldownMs={1000}
+          className="inline-block"
+        >
+          <VoiceIndicator
+            voiceState={{
+              isListening,
+              isSupported,
+              hasPermission,
+              transcript,
+              confidence,
+              loudness
+            }}
+            onToggle={voiceRecognition.toggle}
+          />
+        </CooldownRing>
       </div>
 
       {/* Cast History */}
@@ -938,6 +1086,14 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
           </Card>
         </div>
       )}
+
+      {/* NEW: Mic Block Modal */}
+      <MicBlockModal
+        isOpen={showMicModal}
+        onRetry={handleMicRetry}
+        onSpectate={handleSpectateMode}
+        onCancel={handleMicCancel}
+      />
     </div>
   );
 };

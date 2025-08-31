@@ -6,26 +6,39 @@ export type BotDifficulty = 'easy' | 'medium' | 'hard';
 interface BotPreset {
   accuracy: [number, number]; // min, max accuracy
   interval: [number, number]; // min, max interval between casts (ms)
+  reactionDelay: [number, number]; // NEW: reaction time range (ms)
+  mistakeChance: number; // NEW: chance to make mistakes
+  globalCooldown: number; // NEW: minimum time between any casts
   loudnessVariation: number; // how much loudness varies
   elementalAwareness: number; // chance to use counters (0-1)
 }
 
+// FIX: Human-friendly bot balance
 const BOT_PRESETS: Record<BotDifficulty, BotPreset> = {
   easy: {
-    accuracy: [0.55, 0.7],
-    interval: [2500, 3200],
+    accuracy: [0.50, 0.70],
+    interval: [2800, 3400], // Much slower
+    reactionDelay: [800, 1100], // Slower reactions
+    mistakeChance: 0.18, // 18% chance to mess up
+    globalCooldown: 1400, // 1.4s minimum between casts
     loudnessVariation: 0.3,
     elementalAwareness: 0.2,
   },
   medium: {
-    accuracy: [0.65, 0.85],
-    interval: [1800, 2400],
+    accuracy: [0.62, 0.82],
+    interval: [2100, 2700], // Moderate speed
+    reactionDelay: [600, 900],
+    mistakeChance: 0.10, // 10% mistake chance
+    globalCooldown: 1200, // 1.2s cooldown
     loudnessVariation: 0.2,
     elementalAwareness: 0.5,
   },
   hard: {
-    accuracy: [0.8, 0.95],
-    interval: [1200, 1800],
+    accuracy: [0.75, 0.92],
+    interval: [1600, 2100], // Fast but not inhuman
+    reactionDelay: [450, 700],
+    mistakeChance: 0.06, // 6% mistakes
+    globalCooldown: 1100, // 1.1s cooldown
     loudnessVariation: 0.1,
     elementalAwareness: 0.8,
   },
@@ -48,6 +61,7 @@ export class BotOpponent {
   private difficulty: BotDifficulty;
   private preset: BotPreset;
   private lastCastTime = 0;
+  private lastGlobalCast = 0; // NEW: Track global cooldown
   private cooldowns = new Map<string, number>();
   private hp = 100;
   private maxHp = 100;
@@ -56,6 +70,7 @@ export class BotOpponent {
   private isActive = false;
   private castCallback?: (cast: any) => void;
   private nextCastTimer?: NodeJS.Timeout;
+  private reactionTimer?: NodeJS.Timeout; // NEW: Reaction delay timer
 
   constructor(difficulty: BotDifficulty = 'medium') {
     this.difficulty = difficulty;
@@ -73,6 +88,10 @@ export class BotOpponent {
     if (this.nextCastTimer) {
       clearTimeout(this.nextCastTimer);
       this.nextCastTimer = undefined;
+    }
+    if (this.reactionTimer) {
+      clearTimeout(this.reactionTimer);
+      this.reactionTimer = undefined;
     }
   }
 
@@ -100,19 +119,37 @@ export class BotOpponent {
     const interval = minInterval + Math.random() * (maxInterval - minInterval);
 
     this.nextCastTimer = setTimeout(() => {
-      this.performCast();
-      this.scheduleNextCast();
+      // FIX: Add reaction delay before casting
+      const [minReaction, maxReaction] = this.preset.reactionDelay;
+      const reactionDelay = minReaction + Math.random() * (maxReaction - minReaction);
+      
+      this.reactionTimer = setTimeout(() => {
+        this.performCast();
+        this.scheduleNextCast();
+      }, reactionDelay);
     }, interval);
   }
 
   private performCast(): void {
     if (!this.castCallback || !this.isActive) return;
 
+    const now = performance.now();
+    
+    // FIX: Check global cooldown first
+    if (now - this.lastGlobalCast < this.preset.globalCooldown) {
+      return; // Still in global cooldown
+    }
+
     const spell = this.selectSpell();
     if (!spell) return;
 
-    // Check cooldown
-    const now = performance.now();
+    // Check mana cost
+    const manaCost = spell.manaCost || 20;
+    if (this.mana < manaCost) {
+      return; // Not enough mana
+    }
+
+    // Check spell-specific cooldown
     const lastCast = this.cooldowns.get(spell.id) || 0;
     const cooldownTime = this.getSpellCooldown(spell);
     
@@ -120,9 +157,15 @@ export class BotOpponent {
       return; // Spell still on cooldown
     }
 
-    // Generate bot accuracy and loudness
+    // Generate bot accuracy and loudness with mistakes
     const [minAcc, maxAcc] = this.preset.accuracy;
-    const accuracy = minAcc + Math.random() * (maxAcc - minAcc);
+    let accuracy = minAcc + Math.random() * (maxAcc - minAcc);
+    
+    // FIX: Simulate mistakes - bot occasionally messes up pronunciation
+    if (Math.random() < this.preset.mistakeChance) {
+      accuracy *= 0.6 + Math.random() * 0.3; // Reduce accuracy significantly
+      accuracy = Math.max(0.2, accuracy); // Don't go too low
+    }
     
     const baseLoudness = 0.6;
     const loudnessVariation = this.preset.loudnessVariation;
@@ -144,12 +187,12 @@ export class BotOpponent {
       isBot: true,
     };
 
-    // Update cooldown
+    // FIX: Update cooldowns properly
     this.cooldowns.set(spell.id, now);
     this.lastCastTime = now;
+    this.lastGlobalCast = now; // Track global cooldown
 
     // Consume mana
-    const manaCost = spell.manaCost || 20;
     this.mana = Math.max(0, this.mana - manaCost);
 
     // Trigger callback

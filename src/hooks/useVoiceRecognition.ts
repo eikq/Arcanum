@@ -6,7 +6,10 @@ interface VoiceRecognitionHook extends VoiceRecognitionState {
   stopListening: () => void;
   toggle: () => void;
   resetTranscript: () => void;
-  autoStartListening?: () => Promise<void>; // NEW: added to interface
+  autoStartListening?: () => Promise<void>;
+  primeMic: (deviceId?: string) => Promise<MediaStream>; // NEW: prime mic with device selection
+  rms: () => number; // NEW: expose RMS for gating
+  micDenied: boolean; // NEW: track mic denial state
 }
 
 export const useVoiceRecognition = (
@@ -22,6 +25,9 @@ export const useVoiceRecognition = (
     confidence: 0,
     loudness: 0
   });
+
+  // NEW: Mic denial tracking
+  const [micDenied, setMicDenied] = useState(false);
 
   const recognitionRef = useRef<SpeechRecognition | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -76,22 +82,35 @@ export const useVoiceRecognition = (
         }
       };
 
-      recognition.onerror = (event) => {
+        recognition.onerror = (event) => {
         console.warn('Speech recognition error:', event.error);
         
         if (event.error === 'not-allowed') {
           setState(prev => ({ ...prev, hasPermission: false, isListening: false }));
+          setMicDenied(true); // FIX: Track mic denial
         } else {
-          // Retry on other errors
-          setTimeout(() => {
-            if (state.isListening) {
-              try {
-                recognition.start();
-              } catch (error) {
-                console.warn('Failed to restart after error:', error);
+          // Retry on other errors with capped backoff
+          let retryCount = 0;
+          const maxRetries = 3;
+          const retryWithBackoff = () => {
+            if (retryCount >= maxRetries || !state.isListening) return;
+            
+            const delay = Math.min(5000, 1000 * Math.pow(2, retryCount));
+            setTimeout(() => {
+              if (state.isListening && recognitionRef.current) {
+                try {
+                  recognition.start();
+                } catch (error) {
+                  console.warn(`Retry ${retryCount + 1} failed:`, error);
+                  retryCount++;
+                  retryWithBackoff();
+                }
               }
-            }
-          }, 1000);
+            }, delay);
+          };
+          
+          retryCount++;
+          retryWithBackoff();
         }
       };
 
@@ -141,18 +160,31 @@ export const useVoiceRecognition = (
     };
   }, [hotwordEnabled, hotword, onResult, state.isListening, state.loudness]);
 
-  // FIX: Auto mic detection + init
-  const initializeAudioContext = useCallback(async () => {
+  // NEW: Prime microphone with device selection
+  const primeMic = useCallback(async (deviceId?: string): Promise<MediaStream> => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ 
-        audio: { 
+      const constraints: MediaStreamConstraints = {
+        audio: {
+          deviceId: deviceId ? { exact: deviceId } : undefined,
           echoCancellation: true,
           noiseSuppression: true,
-          autoGainControl: false
-        } 
-      });
+          autoGainControl: false,
+          sampleRate: 44100
+        }
+      };
+
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
       
-      audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+      // Initialize or resume audio context
+      if (!audioContextRef.current) {
+        audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+      }
+      
+      if (audioContextRef.current.state === 'suspended') {
+        await audioContextRef.current.resume();
+      }
+
+      // Set up analyser for RMS monitoring
       analyserRef.current = audioContextRef.current.createAnalyser();
       microphoneRef.current = audioContextRef.current.createMediaStreamSource(stream);
       
@@ -160,14 +192,28 @@ export const useVoiceRecognition = (
       analyserRef.current.fftSize = 512;
       
       setState(prev => ({ ...prev, hasPermission: true }));
+      setMicDenied(false);
       
-      // Start loudness monitoring immediately
+      // Start loudness monitoring
       monitorLoudness();
+      
+      return stream;
     } catch (error) {
-      console.error('Failed to initialize audio context:', error);
+      console.error('Failed to prime microphone:', error);
       setState(prev => ({ ...prev, hasPermission: false }));
+      setMicDenied(true);
+      throw error;
     }
   }, []);
+
+  // FIX: Auto mic detection + init (legacy support)
+  const initializeAudioContext = useCallback(async () => {
+    try {
+      await primeMic();
+    } catch (error) {
+      console.error('Failed to initialize audio context:', error);
+    }
+  }, [primeMic]);
 
   // FIX: Auto-start on mount for Practice/Match scenes
   const autoStartListening = useCallback(async () => {
@@ -256,12 +302,20 @@ export const useVoiceRecognition = (
     setState(prev => ({ ...prev, transcript: '', confidence: 0 }));
   }, []);
 
+  // NEW: Expose RMS for casting gates
+  const rms = useCallback(() => {
+    return state.loudness;
+  }, [state.loudness]);
+
   return {
     ...state,
     startListening,
     stopListening,
     toggle,
     resetTranscript,
-    autoStartListening // NEW: expose auto-start for Practice/Match
+    autoStartListening,
+    primeMic, // NEW: expose primeMic for manual setup
+    rms, // NEW: expose RMS getter
+    micDenied // NEW: expose mic denial state
   };
 };
