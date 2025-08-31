@@ -10,7 +10,6 @@ import { SpellCard } from './SpellCard';
 import { MicGauge } from '@/components/ui/mic-gauge';
 import { DiagnosticOverlay, DiagnosticState } from '@/components/ui/diagnostic-overlay';
 import { CooldownRing } from '@/components/ui/cooldown-ring';
-import { rescoreSpell } from '@/engine/recognition/SpellRescorer';
 import { calculateSpellPower } from '@/utils/spellMatcher';
 import { canCastGate, canCast, markCast, getRemainingCooldown } from '@/utils/castGating';
 import { rescoreSpell } from '@/engine/recognition/SpellRescorer';
