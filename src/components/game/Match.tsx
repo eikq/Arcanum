@@ -56,6 +56,7 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
   const [winner, setWinner] = useState<string | null>(null);
   const [endKind, setEndKind] = useState<EndKind>('victory');
   const [showEndModal, setShowEndModal] = useState(false);
+  const [matchStartTime, setMatchStartTime] = useState<number>(0);
   
   // Players
   const [players, setPlayers] = useState<Player[]>([
@@ -219,7 +220,9 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
   const startMatch = useCallback(async () => {
     setGameState('playing');
     setCountdown(null);
-    matchStartTimeRef.current = Date.now();
+    const startTime = Date.now();
+    setMatchStartTime(startTime);
+    matchStartTimeRef.current = startTime;
     
     // Start voice recognition
     try {
@@ -242,14 +245,19 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
     soundManager.music.start('battle_theme');
     
     // Start match timer
+  }, [hasPermission, mode]);
+
+  // Match timer effect
+  useEffect(() => {
+    if (gameState !== 'playing' || isPaused || matchStartTime === 0) return;
+
     const timerInterval = setInterval(() => {
-      if (gameState === 'playing' && !isPaused) {
-        setMatchDuration(prev => prev + 1);
-      }
+      const elapsed = Math.floor((Date.now() - matchStartTime) / 1000);
+      setMatchDuration(elapsed);
     }, 1000);
 
     return () => clearInterval(timerInterval);
-  }, [hasPermission, mode, gameState, isPaused]);
+  }, [gameState, isPaused, matchStartTime]);
 
   // Handle player cast
   const handlePlayerCast = useCallback((payload: {
@@ -410,41 +418,40 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
         const newHp = Math.max(0, player.hp - amount);
         
         // Check for defeat when HP reaches 0
-        if (newHp === 0 && gameState === 'playing') {
+        if (newHp === 0) {
           const isPlayerDefeated = playerId === 'player1';
           
-          // Stop the match immediately
-          setGameState('finished');
-          setIsPaused(true);
-          
-          // Stop voice recognition and bot
-          voiceRecognition.stop();
-          if (botOpponentRef.current) {
-            botOpponentRef.current.stop();
-          }
-          
-          // Set winner and end state
-          const winnerName = isPlayerDefeated ? prev.find(p => p.id === 'player2')?.name || 'Opponent' : 'You';
-          setWinner(winnerName);
-          setEndKind(isPlayerDefeated ? 'defeat' : 'victory');
-          
-          // Show end modal after brief delay
           setTimeout(() => {
+            // Stop the match
+            setGameState('finished');
+            setIsPaused(true);
+            
+            // Stop voice recognition and bot
+            voiceRecognition.stop();
+            if (botOpponentRef.current) {
+              botOpponentRef.current.stop();
+            }
+            
+            // Set winner and end state
+            const winnerName = isPlayerDefeated ? prev.find(p => p.id === 'player2')?.name || 'Opponent' : 'You';
+            setWinner(winnerName);
+            setEndKind(isPlayerDefeated ? 'defeat' : 'victory');
+            
+            // Show end modal
             setShowEndModal(true);
-          }, 1000);
-          
-          setShowEndModal(true);
-          soundManager.stopMusic();
-          if (!isPlayerDefeated) {
-            soundManager.music.start('victory');
-          }
+            
+            soundManager.stopMusic();
+            if (!isPlayerDefeated) {
+              soundManager.music.start('victory');
+            }
+          }, 500);
         }
         
         return { ...player, hp: newHp };
       }
       return player;
     }));
-  }, [gameState, voiceRecognition, botOpponentRef]);
+  }, [voiceRecognition]);
 
   const healPlayer = useCallback((playerId: string, amount: number) => {
     setPlayers(prev => prev.map(player => {
