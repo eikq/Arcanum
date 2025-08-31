@@ -23,7 +23,15 @@ export class NetClient {
   public currentRoom: RoomID | null = null;
   private listeners: Map<keyof NetClientEvents, Function[]> = new Map();
 
-  constructor(private serverUrl = 'ws://localhost:5175') {}
+  constructor(private serverUrl?: string) {
+    if (!serverUrl) {
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const hostname = window.location.hostname;
+      this.serverUrl = `${protocol}//${hostname}:5175`;
+    } else {
+      this.serverUrl = serverUrl;
+    }
+  }
 
   // FIX: Explicit connection management with state tracking
   connect(): Promise<void> {
