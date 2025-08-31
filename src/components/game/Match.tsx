@@ -88,7 +88,7 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
     hotwordEnabled,
     hotword,
     // onInterim callback
-    (transcript: string, rms: number, dbfs: number) => {
+    (transcript: string) => {
       if (!transcript.trim()) {
         setTopGuesses([]);
         return;
@@ -103,7 +103,7 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
       })));
     },
     // onFinal callback
-    (transcript: string, rms: number, dbfs: number) => {
+    (transcript: string) => {
       if (gameState !== 'playing' || isPaused || !transcript.trim()) return;
       
       // Check cooldown
@@ -116,6 +116,7 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
       const spell = SPELL_DATABASE.find(s => s.id === entry.id) || SPELL_DATABASE[0];
       
       // Calculate power
+      const rms = audioMeterRef.current?.getRms() || 0;
       const normalizedRms = audioMeterRef.current?.normalizedRms(rms) || 0;
       const power = calculateSpellPower(score, rms, normalizedRms, matched);
       
@@ -135,6 +136,7 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
     }
   );
 
+  const { isListening, transcript, confidence, loudness, hasPermission, isSupported, interim, final } = voiceRecognition;
 
   // Casting visuals
   const [activeCasts, setActiveCasts] = useState<{
@@ -158,19 +160,15 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
   
   // Handle mic toggle with proper async handling
   const handleMicToggle = useCallback(async () => {
-    console.log('🎤 Mic toggle clicked, current state:', voiceRecognition.isListening);
-    
     try {
-      if (voiceRecognition.isListening) {
+      if (isListening) {
         voiceRecognition.stop();
-        console.log('🛑 Stopped voice recognition');
         toast({
           title: "Microphone Stopped",
           description: "Voice recognition has been stopped",
         });
       } else {
         await voiceRecognition.start();
-        console.log('▶️ Started voice recognition');
         toast({
           title: "Microphone Started", 
           description: "Voice recognition is now active",
@@ -184,7 +182,7 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
         variant: "destructive",
       });
     }
-  }, [voiceRecognition]);
+  }, [isListening, voiceRecognition]);
 
   // Initialize systems
   useEffect(() => {
@@ -342,20 +340,9 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
     if (damage > 0) {
       dealDamage('player2', damage);
       setTotalDamageDealt(prev => prev + damage);
-      
-      // Play cast sound effect
-      soundManager.playCast(spell.element, payload.loudness);
-      
-      // Play impact sound after projectile delay
-      setTimeout(() => {
-        soundManager.playImpact(spell.element);
-      }, 800);
     }
     if (healing > 0) {
       healPlayer('player1', healing);
-      
-      // Play healing sound
-      soundManager.playCast(spell.element, payload.loudness);
     }
     
     // Visual and audio feedback
@@ -440,18 +427,9 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
     if (damage > 0) {
       dealDamage('player1', damage);
       setTotalDamageTaken(prev => prev + damage);
-      
-      // Play opponent cast and impact sounds
-      soundManager.playCast(spell.element, castData.loudness || 0.8);
-      setTimeout(() => {
-        soundManager.playImpact(spell.element);
-      }, 800);
     }
     if (healing > 0) {
       healPlayer('player2', healing);
-      
-      // Play healing sound
-      soundManager.playCast(spell.element, castData.loudness || 0.8);
     }
     
     // Visual feedback
@@ -800,11 +778,13 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
                   variant="outline"
                   size="sm"
                   onClick={handleMicToggle}
+                  onMouseDown={(e) => e.preventDefault()}
+                  onTouchStart={(e) => e.preventDefault()}
                   className="gap-2"
-                  disabled={!voiceRecognition.hasPermission}
+                  disabled={!hasPermission}
                 >
-                  {voiceRecognition.isListening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
-                  {voiceRecognition.isListening ? 'Stop' : 'Start'}
+                  {isListening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+                  {isListening ? 'Stop' : 'Start'}
                 </Button>
               </div>
             </div>

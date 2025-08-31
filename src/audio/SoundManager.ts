@@ -199,8 +199,6 @@ export class SoundManager {
 
   // NEW: Enhanced cast sound with element variation
   playElementSound(element: SpellElement, type: 'cast' | 'impact', power: number = 1, pitch: number = 1) {
-    console.log('🎛️ Playing procedural sound:', element, type, 'power:', power);
-    
     if (!this.audioContext) return;
     
     const elementFreqs: Record<SpellElement, number> = {
@@ -220,7 +218,7 @@ export class SoundManager {
     
     const g1 = this.audioContext.createGain();
     g1.gain.setValueAtTime(0.0001, t);
-    g1.gain.exponentialRampToValueAtTime(0.3 * power, t + 0.05);
+    g1.gain.exponentialRampToValueAtTime(0.2 * power, t + 0.05);
     g1.gain.exponentialRampToValueAtTime(0.0001, t + (type === 'cast' ? 0.4 : 0.2));
     
     // Element chime
@@ -230,7 +228,7 @@ export class SoundManager {
     
     const g2 = this.audioContext.createGain();
     g2.gain.setValueAtTime(0.0001, t + 0.1);
-    g2.gain.exponentialRampToValueAtTime(0.25 * power, t + 0.15);
+    g2.gain.exponentialRampToValueAtTime(0.15 * power, t + 0.15);
     g2.gain.exponentialRampToValueAtTime(0.0001, t + (type === 'cast' ? 0.5 : 0.3));
     
     o1.connect(g1).connect(this.audioContext.destination);
@@ -240,8 +238,6 @@ export class SoundManager {
     o1.stop(t + (type === 'cast' ? 0.4 : 0.2));
     o2.start(t + 0.1);
     o2.stop(t + (type === 'cast' ? 0.5 : 0.3));
-    
-    console.log('🎛️ Procedural sound played successfully');
   }
 
   // Cast sound with elemental layers
