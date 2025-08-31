@@ -80,6 +80,16 @@ export class BotOpponent {
   start(onCast: (cast: any) => void): void {
     this.castCallback = onCast;
     this.isActive = true;
+    
+    // Start mana regeneration for bot
+    const manaRegenInterval = setInterval(() => {
+      if (this.isActive) {
+        this.mana = Math.min(this.maxMana, this.mana + 5); // 5 mana per second
+      } else {
+        clearInterval(manaRegenInterval);
+      }
+    }, 1000);
+    
     this.scheduleNextCast();
   }
 
@@ -197,11 +207,6 @@ export class BotOpponent {
 
     // Trigger callback
     this.castCallback(castPayload);
-
-    // Regenerate mana over time
-    setTimeout(() => {
-      this.mana = Math.min(this.maxMana, this.mana + 10);
-    }, 1000);
   }
 
   private selectSpell(): Spell | null {

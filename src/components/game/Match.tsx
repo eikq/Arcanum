@@ -274,6 +274,17 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
     setMatchStartTime(startTime);
     matchStartTimeRef.current = startTime;
     
+    // Start mana regeneration
+    const manaRegenInterval = setInterval(() => {
+      setPlayers(prev => prev.map(player => ({
+        ...player,
+        mana: Math.min(player.maxMana, player.mana + 5) // Regenerate 5 mana per second
+      })));
+    }, 1000);
+    
+    // Store interval for cleanup
+    const cleanupManaRegen = () => clearInterval(manaRegenInterval);
+    
     // Start voice recognition
     try {
       // Initialize microphone first
@@ -329,6 +340,19 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
     const spell = SPELL_DATABASE.find(s => s.id === payload.spellId);
     if (!spell) return;
     
+    // Check mana cost
+    const manaCost = spell.manaCost || 20;
+    const currentPlayer = players.find(p => p.id === 'player1');
+    if (currentPlayer && currentPlayer.mana < manaCost) {
+      // Not enough mana - show feedback but don't cast
+      toast({
+        title: "Not Enough Mana",
+        description: `${spell.name} requires ${manaCost} mana (you have ${currentPlayer.mana})`,
+        variant: "destructive",
+      });
+      return;
+    }
+    
     const damage = spell.damage ? Math.floor(spell.damage * payload.power) : 0;
     const healing = spell.healing ? Math.floor(spell.healing * payload.power) : 0;
     
@@ -354,6 +378,15 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
     if (healing > 0) {
       healPlayer('player1', healing);
     }
+    
+    // Consume mana
+    const manaCost = spell.manaCost || 20;
+    setPlayers(prev => prev.map(player => {
+      if (player.id === 'player1') {
+        return { ...player, mana: Math.max(0, player.mana - manaCost) };
+      }
+      return player;
+    }));
     
     // Visual and audio feedback
     setActiveCasts(prev => ({
@@ -429,6 +462,13 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
     const spell = SPELL_DATABASE.find(s => s.id === castData.spellId);
     if (!spell) return;
     
+    // Check opponent mana cost
+    const manaCost = spell.manaCost || 20;
+    const currentOpponent = players.find(p => p.id === 'player2');
+    if (currentOpponent && currentOpponent.mana < manaCost) {
+      return; // Bot/opponent can't cast without mana
+    }
+    
     const damage = spell.damage ? Math.floor(spell.damage * castData.power) : 0;
     const healing = spell.healing ? Math.floor(spell.healing * castData.power) : 0;
     
@@ -454,6 +494,15 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
     if (healing > 0) {
       healPlayer('player2', healing);
     }
+    
+    // Consume opponent mana
+    const manaCost = spell.manaCost || 20;
+    setPlayers(prev => prev.map(player => {
+      if (player.id === 'player2') {
+        return { ...player, mana: Math.max(0, player.mana - manaCost) };
+      }
+      return player;
+    }));
     
     // Visual feedback
     setActiveCasts(prev => ({
