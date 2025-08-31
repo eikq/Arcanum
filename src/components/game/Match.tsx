@@ -545,7 +545,7 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
           botOpponentRef.current.stop();
         }
       } else {
-        if (voiceRecognition.hasPermission) {
+        if (hasPermission) {
           voiceRecognition.start();
         }
         if (botOpponentRef.current) {
@@ -554,7 +554,7 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
       }
       return newPaused;
     });
-  }, [gameState, voiceRecognition, handleOpponentCast]);
+  }, [gameState, hasPermission, voiceRecognition, handleOpponentCast]);
 
   // End match handlers
   const handlePlayAgain = useCallback(() => {
