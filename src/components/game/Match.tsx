@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { toast } from '@/hooks/use-toast';
-import { VoiceIndicator } from './VoiceIndicator';
 import { useVoiceRecognition } from '@/hooks/useVoiceRecognition';
 import { Caster } from './Caster';
 import { Projectile } from './Projectile';
@@ -10,7 +9,6 @@ import { CastFeed, type FeedItem } from './CastFeed';
 import { EndMatchModal, type EndKind } from './EndMatchModal';
 import { CooldownRing } from '@/components/ui/cooldown-ring';
 import { MicGauge } from '@/components/ui/mic-gauge';
-import { handleFinalTranscript, resetCastHistory, type AutoCasterDeps } from '@/gameplay/AutoCaster';
 import { rescoreSpell, bestOrFallback } from '@/engine/recognition/SpellRescorer';
 import { SPELL_DATABASE } from '@/data/spells';
 import { SpellElement } from '@/types/game';
@@ -22,6 +20,7 @@ import { voiceChat } from '@/network/VoiceChat';
 import type { RoomSnapshot, CastPayload } from '@/shared/net';
 import { makeServerTimer, canCast, markCast } from '@/shared/net';
 import { AudioMeter } from '@/audio/AudioMeter';
+import { calculateSpellPower } from '@/utils/spellMatcher';
 import { 
   Volume2, VolumeX, Pause, Play, Settings, 
   Mic, MicOff, Shield, Heart, Zap, 
@@ -79,6 +78,10 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
     score: number;
   }>>([]);
   
+  // Settings from props
+  const hotwordEnabled = settings.hotwordEnabled || false;
+  const hotword = settings.hotword || 'arcanum';
+  
   // Casting visuals
   const [activeCasts, setActiveCasts] = useState<{
     player1?: { element: SpellElement; timestamp: number };
@@ -129,13 +132,13 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
       }
       
       // Use rescoring system to find best spell match
-      const { entry, score, matched } = bestOrFallback(transcript, 0.4);
+      const { entry, score, matched } = bestOrFallback(transcript, 0.25); // Lower threshold for better casting
       const spell = SPELL_DATABASE.find(s => s.id === entry.id) || SPELL_DATABASE[0];
       
       // Calculate power
       const rms = audioMeterRef.current?.getRms() || 0;
       const normalizedRms = audioMeterRef.current?.normalizedRms(rms) || 0;
-      const power = Math.min(score * 0.6 + normalizedRms * 0.4, 1.0);
+      const power = calculateSpellPower(score, rms, normalizedRms, matched);
       
       // Cast the spell
       handlePlayerCast({
@@ -147,6 +150,9 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
       });
       
       markCast();
+      
+      // Clear top guesses after casting
+      setTopGuesses([]);
     }
   );
 
@@ -156,9 +162,6 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
   useEffect(() => {
     const initSystems = async () => {
       try {
-        // Initialize microphone first
-        await voiceRecognition.primeMic();
-        
         // Initialize audio
         await soundManager.init();
         soundManager.setVolumes({
@@ -169,7 +172,7 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
         
         // Initialize audio meter
         const meter = new AudioMeter();
-        await meter.start();
+        meter.start();
         audioMeterRef.current = meter;
         
         // Initialize VFX
@@ -211,9 +214,7 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
       }
       voiceChat.disconnect();
       soundManager.stopMusic();
-      resetCastHistory();
     };
-  }, []);
 
   // Start countdown
   const startCountdown = useCallback(() => {
@@ -243,9 +244,16 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
     
     // Start voice recognition
     try {
+      // Initialize microphone first
+      await voiceRecognition.primeMic();
       await voiceRecognition.startListening();
     } catch (error) {
       console.error('Failed to start voice recognition:', error);
+      toast({
+        title: "Microphone Error",
+        description: "Failed to start voice recognition. Please check microphone permissions.",
+        variant: "destructive",
+      });
     }
     
     // Start bot opponent
@@ -259,7 +267,6 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
     soundManager.music.start('battle_theme');
     
     // Start match timer
-  }, [hasPermission, mode]);
 
   // Match timer effect
   useEffect(() => {
@@ -715,6 +722,19 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
                     ))}
                   </div>
                 )}
+                
+                {/* Manual mic toggle for debugging */}
+                <div className="flex gap-2 mt-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => voiceRecognition.toggle()}
+                    className="gap-1"
+                  >
+                    {isListening ? <MicOff className="w-3 h-3" /> : <Mic className="w-3 h-3" />}
+                    {isListening ? 'Stop' : 'Start'}
+                  </Button>
+                </div>
               </div>
             </div>
             
