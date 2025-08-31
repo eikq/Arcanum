@@ -124,16 +124,16 @@ export const useVoiceRecognition = (
           setListening(false);
           setMicDenied(true);
           setError('Microphone permission denied');
-        } else if (event.error === 'no-speech') {
+        } else if (event.error === 'no-speech' || event.error === 'aborted') {
           // This is normal, just restart
           if (hasPermission && micStateRef.current?.ready === "ready") {
             setTimeout(() => {
               try {
-                if (recognitionRef.current) {
+                if (recognitionRef.current && !listening) {
                   recognition.start();
                 }
               } catch (e) {
-                console.warn('Failed to restart after no-speech:', e);
+                console.warn('Failed to restart after error:', e);
               }
             }, 1000);
           }
@@ -251,16 +251,20 @@ export const useVoiceRecognition = (
       return;
     }
     
+    // Don't start if already listening
+    if (listening) {
+      return;
+    }
+    
     if (!hasPermission) {
       await primeMic();
     }
     
     try {
       recognitionRef.current.start();
-      setListening(true);
       setError(undefined);
     } catch (error) {
-      if (error instanceof Error && error.name !== 'InvalidStateError') {
+      if (error instanceof Error && !error.message.includes('already started')) {
         console.error('Failed to start speech recognition:', error);
         setError(error.message);
       }
@@ -269,16 +273,21 @@ export const useVoiceRecognition = (
 
   // Stop listening
   const stop = useCallback(() => {
+    setListening(false);
+    
     if (restartTimeoutRef.current) {
       clearTimeout(restartTimeoutRef.current);
       restartTimeoutRef.current = null;
     }
     
     if (recognitionRef.current) {
-      recognitionRef.current.stop();
+      try {
+        recognitionRef.current.stop();
+      } catch (error) {
+        // Ignore errors when stopping
+        console.warn('Error stopping speech recognition:', error);
+      }
     }
-    
-    setListening(false);
   }, []);
 
   // Restart with exponential backoff
