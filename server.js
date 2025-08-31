@@ -9,6 +9,19 @@ const app = express();
 const httpServer = createServer(app);
 const io = new Server(httpServer, { cors: { origin: "*" } });
 
+// Add CORS middleware for Express
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept');
+  next();
+});
+
+// Health check endpoint
+app.get('/health', (req, res) => {
+  res.json({ status: 'ok', timestamp: Date.now() });
+});
+
 // FIX: Authoritative room state machine
 class Room {
   constructor(id, vsBot = false) {
@@ -102,61 +115,79 @@ io.on("connection", (socket) => {
   socket.on("queue:join", (data, ack) => {
     try {
       const { mode, roomCode: requestedCode, nick } = data;
+      console.log(`Player ${socket.id} joining queue:`, { mode, roomCode: requestedCode, nick });
 
       if (mode === "quick") {
         if (quickQueue.length && quickQueue[0] !== socket.id) {
           const otherId = quickQueue.shift();
           const roomId = roomCode();
+          console.log(`Quick match found: ${socket.id} vs ${otherId}, room: ${roomId}`);
           const room = new Room(roomId, false);
           room.addPlayer(otherId, 'Player');
           room.addPlayer(socket.id, nick);
           rooms.set(roomId, room);
           
-          io.to([otherId, socket.id]).emit("room:snapshot", room.getSnapshot());
+          const snapshot = room.getSnapshot();
+          console.log(`Sending room snapshot to players:`, snapshot);
+          io.to([otherId, socket.id]).emit("room:snapshot", snapshot);
           ack(true, "Matched!", roomId);
         } else {
           quickQueue.push(socket.id);
+          console.log(`Player ${socket.id} added to quick queue, position: ${quickQueue.length}`);
           socket.emit("queue:waiting", { eta: 15 });
           ack(true, "In queue", null);
           
           // Fallback to bot after 15s
           setTimeout(() => {
             if (quickQueue.includes(socket.id)) {
+              console.log(`Quick queue timeout for ${socket.id}, starting bot match`);
               quickQueue.splice(quickQueue.indexOf(socket.id), 1);
               const roomId = roomCode();
               const room = new Room(roomId, true);
               room.addPlayer(socket.id, nick);
               rooms.set(roomId, room);
-              socket.emit("room:snapshot", room.getSnapshot());
+              const snapshot = room.getSnapshot();
+              console.log(`Bot match created for ${socket.id}:`, snapshot);
+              socket.emit("room:snapshot", snapshot);
               ack(true, "Bot match started", roomId);
             }
           }, 15000);
         }
       } else if (mode === "code") {
         const roomId = (requestedCode || roomCode()).toUpperCase();
+        console.log(`Code room request: ${roomId}`);
         let room = rooms.get(roomId);
         
         if (!room) {
+          console.log(`Creating new code room: ${roomId}`);
           room = new Room(roomId, false);
           room.addPlayer(socket.id, nick);
           rooms.set(roomId, room);
           ack(true, "Room created", roomId);
         } else if (room.players.length < 2) {
+          console.log(`Joining existing code room: ${roomId}`);
           room.addPlayer(socket.id, nick);
-          io.to(room.players.map(p => p.id)).emit("room:snapshot", room.getSnapshot());
+          const snapshot = room.getSnapshot();
+          console.log(`Updated room snapshot:`, snapshot);
+          io.to(room.players.map(p => p.id)).emit("room:snapshot", snapshot);
           ack(true, "Room joined", roomId);
         } else {
+          console.log(`Room ${roomId} is full`);
           ack(false, "Room full", null);
         }
       } else if (mode === "bot") {
+        console.log(`Bot match request from ${socket.id}`);
         const roomId = roomCode();
         const room = new Room(roomId, true);
         room.addPlayer(socket.id, nick);
         rooms.set(roomId, room);
-        socket.emit("room:snapshot", room.getSnapshot());
+        const snapshot = room.getSnapshot();
+        console.log(`Bot match created:`, snapshot);
+        socket.emit("room:snapshot", snapshot);
         ack(true, "Bot match ready", roomId);
       }
     } catch (e) {
+      console.error(`Error in queue:join:`, e);
       ack(false, String(e), null);
     }
   });

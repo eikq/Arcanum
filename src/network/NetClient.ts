@@ -28,36 +28,45 @@ export class NetClient {
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
       const hostname = window.location.hostname;
       
-      // Check if port is already embedded in hostname (webcontainer pattern)
-      if (hostname.includes('5175') || hostname.includes('--5175--')) {
+      // For development, try localhost first, then webcontainer patterns
+      if (hostname === 'localhost') {
+        this.serverUrl = `${protocol}//localhost:5175`;
+      } else if (hostname.includes('5175') || hostname.includes('--5175--')) {
         this.serverUrl = `${protocol}//${hostname}`;
       } else {
-        this.serverUrl = `${protocol}//${hostname}:5175`;
+        // Try to construct webcontainer URL
+        const baseHost = hostname.split('--')[0];
+        this.serverUrl = `${protocol}//${baseHost}--5175--${hostname.split('--').slice(1).join('--')}`;
       }
     } else {
       this.serverUrl = serverUrl;
     }
+    
+    console.log('NetClient server URL:', this.serverUrl);
   }
 
   // FIX: Explicit connection management with state tracking
   connect(): Promise<void> {
     return new Promise((resolve, reject) => {
       if (this.connectionState === 'connected') {
+        console.log('Already connected to server');
         resolve();
         return;
       }
 
+      console.log('Attempting to connect to server:', this.serverUrl);
       this.connectionState = 'connecting';
       this.emit('connection_changed', this.connectionState);
 
       try {
         this.socket = io(this.serverUrl, {
           transports: ['websocket'],
-          timeout: 5000,
+          timeout: 10000,
+          forceNew: true,
         });
 
         this.socket.on('connect', () => {
-          console.log('Connected to game server');
+          console.log('✅ Connected to game server successfully');
           this.connectionState = 'connected';
           this.emit('connection_changed', this.connectionState);
           this.startHeartbeat();
@@ -65,14 +74,15 @@ export class NetClient {
         });
 
         this.socket.on('connect_error', (error) => {
-          console.warn('Failed to connect to game server:', error);
+          console.error('❌ Failed to connect to game server:', error);
+          console.log('Attempted URL:', this.serverUrl);
           this.connectionState = 'disconnected';
           this.emit('connection_changed', this.connectionState);
           reject(error);
         });
 
         this.socket.on('disconnect', () => {
-          console.log('Disconnected from game server');
+          console.log('🔌 Disconnected from game server');
           this.connectionState = 'disconnected';
           this.emit('connection_changed', this.connectionState);
           this.stopHeartbeat();
@@ -131,12 +141,17 @@ export class NetClient {
   async quickMatch(nick: string = 'Player'): Promise<RoomID> {
     if (!this.socket) throw new Error('Not connected');
     
+    console.log('🎮 Requesting quick match for:', nick);
+    
     return new Promise((resolve, reject) => {
       this.socket!.emit('queue:join', { mode: 'quick', nick }, (ok, msg, roomId) => {
+        console.log('Quick match response:', { ok, msg, roomId });
         if (ok && roomId) {
           this.currentRoom = roomId;
+          console.log('✅ Quick match successful, room:', roomId);
           resolve(roomId);
         } else {
+          console.log('❌ Quick match failed:', msg);
           reject(new Error(msg || 'Failed to join queue'));
         }
       });
@@ -162,12 +177,17 @@ export class NetClient {
   async joinRoom(roomCode: string, nick: string = 'Player'): Promise<RoomID> {
     if (!this.socket) throw new Error('Not connected');
     
+    console.log('🚪 Joining room:', roomCode, 'as:', nick);
+    
     return new Promise((resolve, reject) => {
       this.socket!.emit('queue:join', { mode: 'code', roomCode, nick }, (ok, msg, roomId) => {
+        console.log('Join room response:', { ok, msg, roomId });
         if (ok && roomId) {
           this.currentRoom = roomId;
+          console.log('✅ Joined room successfully:', roomId);
           resolve(roomId);
         } else {
+          console.log('❌ Failed to join room:', msg);
           reject(new Error(msg || 'Room not found or full'));
         }
       });
