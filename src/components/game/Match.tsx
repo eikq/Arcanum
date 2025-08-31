@@ -9,6 +9,7 @@ import { CastFeed, type FeedItem } from './CastFeed';
 import { EndMatchModal, type EndKind } from './EndMatchModal';
 import { CooldownRing } from '@/components/ui/cooldown-ring';
 import { MicGauge } from '@/components/ui/mic-gauge';
+import { SpellList } from './SpellList';
 import { rescoreSpell, bestOrFallback } from '@/engine/recognition/SpellRescorer';
 import { SPELL_DATABASE } from '@/data/spells';
 import { SpellElement } from '@/types/game';
@@ -69,6 +70,10 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
   const [globalCooldown, setGlobalCooldown] = useState(false);
   const [totalDamageDealt, setTotalDamageDealt] = useState(0);
   const [totalDamageTaken, setTotalDamageTaken] = useState(0);
+  
+  // UI state
+  const [showSpellList, setShowSpellList] = useState(false);
+  const [spellListCollapsed, setSpellListCollapsed] = useState(true);
   
   // Voice and audio
   const [isMuted, setIsMuted] = useState(false);
@@ -136,7 +141,6 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
     }
   );
 
-  const { isListening, transcript, confidence, loudness, hasPermission, isSupported, interim, final } = voiceRecognition;
 
   // Casting visuals
   const [activeCasts, setActiveCasts] = useState<{
@@ -161,7 +165,7 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
   // Handle mic toggle with proper async handling
   const handleMicToggle = useCallback(async () => {
     try {
-      if (isListening) {
+      if (voiceRecognition.isListening) {
         voiceRecognition.stop();
         toast({
           title: "Microphone Stopped",
@@ -182,7 +186,6 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
         variant: "destructive",
       });
     }
-  }, [isListening, voiceRecognition]);
 
   // Initialize systems
   useEffect(() => {
@@ -523,7 +526,7 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
           botOpponentRef.current.stop();
         }
       } else {
-        if (hasPermission) {
+        if (voiceRecognition.hasPermission) {
           voiceRecognition.start();
         }
         if (botOpponentRef.current) {
@@ -531,10 +534,8 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
         }
       }
       return newPaused;
-    });
-  }, [gameState, hasPermission, voiceRecognition, handleOpponentCast]);
 
-  // End match handlers
+  }, [gameState, voiceRecognition, handleOpponentCast]);
   const handlePlayAgain = useCallback(() => {
     console.log('🔄 Starting match restart...');
     
