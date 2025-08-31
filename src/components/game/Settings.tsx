@@ -5,8 +5,11 @@ import { Slider } from '@/components/ui/slider';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
 import { Separator } from '@/components/ui/separator';
-import { ArrowLeft, Mic, Volume2, Eye, Type, Shield } from 'lucide-react';
+import { ArrowLeft, Mic, Volume2, Eye, Type, Shield, RefreshCw } from 'lucide-react';
 import { GameSettings } from '@/types/game';
+import { useState, useEffect } from 'react';
+import { reacquireMic, getMicState } from '@/audio/MicBootstrap';
+import { toast } from '@/hooks/use-toast';
 
 interface SettingsProps {
   settings: GameSettings;
@@ -15,6 +18,67 @@ interface SettingsProps {
 }
 
 export const Settings = ({ settings, onSettingsChange, onBack }: SettingsProps) => {
+  const [audioDevices, setAudioDevices] = useState<MediaDeviceInfo[]>([]);
+  const [selectedDeviceId, setSelectedDeviceId] = useState<string>('');
+  const [isFixingMic, setIsFixingMic] = useState(false);
+
+  // Load audio devices
+  useEffect(() => {
+    const loadDevices = async () => {
+      try {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const audioInputs = devices.filter(d => d.kind === 'audioinput');
+        setAudioDevices(audioInputs);
+        
+        // Set current device
+        const currentDeviceId = getMicState().deviceId;
+        if (currentDeviceId) {
+          setSelectedDeviceId(currentDeviceId);
+        }
+      } catch (error) {
+        console.warn('Failed to enumerate devices:', error);
+      }
+    };
+
+    loadDevices();
+  }, []);
+
+  const handleDeviceChange = async (deviceId: string) => {
+    setSelectedDeviceId(deviceId);
+    try {
+      await reacquireMic("device switched");
+      toast({
+        title: "Microphone Switched",
+        description: "Successfully switched to new microphone device",
+      });
+    } catch (error) {
+      toast({
+        title: "Device Switch Failed",
+        description: "Could not switch to selected device",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleFixMic = async () => {
+    setIsFixingMic(true);
+    try {
+      await reacquireMic("user tap");
+      toast({
+        title: "Microphone Fixed",
+        description: "Microphone has been reacquired successfully",
+      });
+    } catch (error) {
+      toast({
+        title: "Fix Failed",
+        description: "Could not fix microphone. Try refreshing the page.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsFixingMic(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-background via-card to-background p-6">
       <div className="max-w-4xl mx-auto">
@@ -40,6 +104,42 @@ export const Settings = ({ settings, onSettingsChange, onBack }: SettingsProps) 
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
+              {/* Microphone Device Selection */}
+              <div className="space-y-2">
+                <Label htmlFor="mic-device">Microphone Device</Label>
+                <div className="flex gap-2">
+                  <Select 
+                    value={selectedDeviceId} 
+                    onValueChange={handleDeviceChange}
+                  >
+                    <SelectTrigger className="flex-1">
+                      <SelectValue placeholder="Select microphone" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {audioDevices.map(device => (
+                        <SelectItem key={device.deviceId} value={device.deviceId}>
+                          {device.label || `Microphone ${device.deviceId.slice(0, 8)}`}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleFixMic}
+                    disabled={isFixingMic}
+                    className="gap-2"
+                  >
+                    {isFixingMic ? (
+                      <RefreshCw className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <RefreshCw className="w-4 h-4" />
+                    )}
+                    Fix Mic
+                  </Button>
+                </div>
+              </div>
+
               <div className="space-y-2">
                 <Label htmlFor="sr-language">Recognition Language</Label>
                 <Select 

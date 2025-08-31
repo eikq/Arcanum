@@ -1,4 +1,6 @@
 // Real-time audio metering with RMS and dBFS calculation
+import { subscribeMicState, type MicState } from './MicBootstrap';
+
 export interface AudioMeterState {
   rms: number;
   dbfs: number;
@@ -8,114 +10,74 @@ export interface AudioMeterState {
 export type AudioMeterCallback = (state: AudioMeterState) => void;
 
 export class AudioMeter {
-  public audioContext: AudioContext | null = null;
-  private analyser: AnalyserNode | null = null;
-  private sourceNode: MediaStreamAudioSourceNode | null = null;
-  private compressor: DynamicsCompressorNode | null = null;
-  private dataArray: Float32Array | null = null;
-  private animationFrame: number | null = null;
-  private subscribers: Set<AudioMeterCallback> = new Set();
+  private subscribers = new Set<AudioMeterCallback>();
   private isRunning = false;
-
+  private micStateUnsubscribe?: () => void;
+  private animationFrame?: number;
+  
   // EMA smoothing factor (α ≈ 0.35 for smooth but responsive)
   private smoothingFactor = 0.35;
   private smoothedRms = 0;
+  private smoothedDbfs = -60;
 
   async initialize(stream: MediaStream): Promise<void> {
-    try {
-      // Create or resume AudioContext
-      if (!this.audioContext) {
-        this.audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
-      }
-
-      if (this.audioContext.state === 'suspended') {
-        await this.audioContext.resume();
-      }
-
-      // Build audio graph: Source → Compressor → Analyser
-      this.sourceNode = this.audioContext.createMediaStreamSource(stream);
-      
-      // Light compression for better dynamic range
-      this.compressor = this.audioContext.createDynamicsCompressor();
-      this.compressor.threshold.setValueAtTime(-24, this.audioContext.currentTime);
-      this.compressor.knee.setValueAtTime(30, this.audioContext.currentTime);
-      this.compressor.ratio.setValueAtTime(3, this.audioContext.currentTime);
-      this.compressor.attack.setValueAtTime(0.003, this.audioContext.currentTime);
-      this.compressor.release.setValueAtTime(0.25, this.audioContext.currentTime);
-
-      this.analyser = this.audioContext.createAnalyser();
-      this.analyser.fftSize = 1024;
-      this.analyser.smoothingTimeConstant = 0.8;
-
-      // Connect: Source → Compressor → Analyser
-      this.sourceNode.connect(this.compressor);
-      this.compressor.connect(this.analyser);
-
-      // Prepare data buffer
-      this.dataArray = new Float32Array(this.analyser.fftSize);
-
-      console.log('AudioMeter: Initialized successfully');
-    } catch (error) {
-      console.error('AudioMeter: Failed to initialize:', error);
-      throw error;
-    }
+    // MicBootstrap handles the actual audio setup
+    // This method exists for compatibility
+    console.log('AudioMeter: Using MicBootstrap for audio setup');
   }
 
   start(): void {
-    if (this.isRunning || !this.analyser || !this.dataArray) return;
+    if (this.isRunning) return;
     
     this.isRunning = true;
-    this.updateMeter();
+    
+    // Subscribe to mic state updates
+    this.micStateUnsubscribe = subscribeMicState((micState: MicState) => {
+      if (micState.ready === "ready") {
+        this.updateFromMicState(micState);
+      }
+    });
+    
+    this.startMeterLoop();
   }
 
   stop(): void {
     this.isRunning = false;
+    
     if (this.animationFrame) {
       cancelAnimationFrame(this.animationFrame);
-      this.animationFrame = null;
+      this.animationFrame = undefined;
+    }
+    
+    if (this.micStateUnsubscribe) {
+      this.micStateUnsubscribe();
+      this.micStateUnsubscribe = undefined;
     }
   }
 
-  private updateMeter = (): void => {
-    if (!this.isRunning || !this.analyser || !this.dataArray) return;
+  private startMeterLoop(): void {
+    const updateMeter = () => {
+      if (!this.isRunning) return;
+      
+      // Notify subscribers with current smoothed values
+      const state: AudioMeterState = {
+        rms: this.smoothedRms,
+        dbfs: this.smoothedDbfs,
+        isActive: this.isRunning
+      };
 
-    // Get time domain data for RMS calculation
-    this.analyser.getFloatTimeDomainData(this.dataArray);
-
-    // Compute RMS (Root Mean Square)
-    const rms = this.computeRms(this.dataArray);
-    
-    // Apply EMA smoothing
-    this.smoothedRms = this.smoothingFactor * rms + (1 - this.smoothingFactor) * this.smoothedRms;
-    
-    // Convert RMS to dBFS (decibels relative to full scale)
-    const dbfs = this.rmsToDbfs(this.smoothedRms);
-
-    // Notify subscribers
-    const state: AudioMeterState = {
-      rms: this.smoothedRms,
-      dbfs,
-      isActive: this.isRunning
+      this.subscribers.forEach(callback => callback(state));
+      
+      this.animationFrame = requestAnimationFrame(updateMeter);
     };
-
-    this.subscribers.forEach(callback => callback(state));
-
-    // Continue animation loop
-    this.animationFrame = requestAnimationFrame(this.updateMeter);
-  };
-
-  private computeRms(buffer: Float32Array): number {
-    let sum = 0;
-    for (let i = 0; i < buffer.length; i++) {
-      const sample = buffer[i];
-      sum += sample * sample;
-    }
-    return Math.sqrt(sum / buffer.length);
+    
+    updateMeter();
   }
 
-  private rmsToDbfs(rms: number): number {
-    // Convert RMS to dBFS, with floor at -60 dB
-    return 20 * Math.log10(Math.max(rms, 1e-8));
+  private updateFromMicState(micState: MicState): void {
+    // Apply EMA smoothing
+    this.smoothedRms = this.smoothingFactor * micState.rms + (1 - this.smoothingFactor) * this.smoothedRms;
+    this.smoothedDbfs = this.smoothingFactor * micState.dbfs + (1 - this.smoothingFactor) * this.smoothedDbfs;
   }
 
   subscribe(callback: AudioMeterCallback): () => void {
@@ -128,32 +90,15 @@ export class AudioMeter {
   }
 
   getDbfs(): number {
-    return this.rmsToDbfs(this.smoothedRms);
+    return this.smoothedDbfs;
   }
 
   destroy(): void {
     this.stop();
-    
-    if (this.sourceNode) {
-      this.sourceNode.disconnect();
-      this.sourceNode = null;
-    }
-    
-    if (this.compressor) {
-      this.compressor.disconnect();
-      this.compressor = null;
-    }
-    
-    if (this.analyser) {
-      this.analyser.disconnect();
-      this.analyser = null;
-    }
-
     this.subscribers.clear();
-    this.smoothedRms = 0;
   }
 
-  // Utility functions for external use
+  // Static utility functions
   static computeRms(buffer: Float32Array): number {
     let sum = 0;
     for (let i = 0; i < buffer.length; i++) {

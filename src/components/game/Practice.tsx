@@ -15,6 +15,7 @@ import { canCastGate, canCast, markCast, getRemainingCooldown } from '@/utils/ca
 import { SPELL_DATABASE } from '@/data/spells';
 import { Spell, SpellElement, SpellDifficulty } from '@/types/game';
 import { useToast } from '@/hooks/use-toast';
+import { getMicState } from '@/audio/MicBootstrap';
 
 interface PracticeProps {
   onBack: () => void;
