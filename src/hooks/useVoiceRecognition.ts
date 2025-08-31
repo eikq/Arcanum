@@ -97,25 +97,24 @@ export const useVoiceRecognition = (
         setListening(false);
         isStartingRef.current = false;
         
-        // Simple auto-restart without aggressive retries
-        if (hasPermission && !micDenied && micStateRef.current?.ready === "ready" && !isStartingRef.current) {
+        // Auto-restart if we should still be listening
+        if (hasPermission && !micDenied && !isStartingRef.current) {
           if (restartTimeoutRef.current) clearTimeout(restartTimeoutRef.current);
-          restartTimeoutRef.current = setTimeout(() => {
+          restartTimeoutRef.current = setTimeout(async () => {
             if (recognitionRef.current && !listening && !isStartingRef.current) {
               try {
                 isStartingRef.current = true;
-                recognition.start();
+                await recognition.start();
               } catch (error) {
-                console.warn('Failed to restart SR:', error);
+                console.warn('Auto-restart failed:', error);
                 isStartingRef.current = false;
               }
             }
-          }, 1000);
+          }, 500);
         }
       };
 
       recognition.onerror = (event) => {
-        console.warn('Speech recognition error:', event.error);
         isStartingRef.current = false;
         
         if (event.error === 'not-allowed') {
@@ -124,8 +123,9 @@ export const useVoiceRecognition = (
           setMicDenied(true);
           setError('Microphone permission denied');
         } else {
-          // Don't show errors for normal events
-          if (event.error !== 'no-speech' && event.error !== 'aborted') {
+          // Only show errors for serious issues
+          if (event.error !== 'no-speech' && event.error !== 'aborted' && event.error !== 'network') {
+            console.warn('Speech recognition error:', event.error);
             setError(`Speech recognition error: ${event.error}`);
           }
         }
@@ -134,6 +134,7 @@ export const useVoiceRecognition = (
       recognition.onresult = (event) => {
         const results = event.results;
         let interimTranscript = '';
+        let finalTranscript = '';
         
         // Process all results
         for (let i = event.resultIndex; i < results.length; i++) {
@@ -142,13 +143,14 @@ export const useVoiceRecognition = (
           
           if (result.isFinal) {
             const confidence = result[0].confidence || 0.9;
+            finalTranscript = transcript;
             
             // Update final transcript
             setFinal(transcript);
             setTranscript(transcript);
             setConfidence(confidence);
             if (onFinalCallback) {
-              onFinalCallback(transcript, micStateRef.current?.rms || 0, micStateRef.current?.dbfs || -60);
+              onFinalCallback(transcript);
             }
             if (onResult) {
               onResult(transcript, confidence, loudness);
@@ -165,7 +167,7 @@ export const useVoiceRecognition = (
         if (interimTranscript) {
           setInterim(interimTranscript);
           if (onInterimCallback) {
-            onInterimCallback(interimTranscript, micStateRef.current?.rms || 0, micStateRef.current?.dbfs || -60);
+            onInterimCallback(interimTranscript);
           }
         }
       };

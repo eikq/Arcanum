@@ -100,8 +100,12 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
   const audioMeterRef = useRef<AudioMeter | null>(null);
   
   // Voice recognition with AutoCaster integration
-  const voiceRecognition = useVoiceRecognition({
-    onInterim: (transcript: string) => {
+  const voiceRecognition = useVoiceRecognition(
+    undefined, // Legacy onResult callback
+    hotwordEnabled,
+    hotword,
+    // onInterim callback
+    (transcript: string) => {
       if (!transcript.trim()) {
         setTopGuesses([]);
         return;
@@ -115,7 +119,8 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
         score: match.score
       })));
     },
-    onFinal: (transcript: string) => {
+    // onFinal callback
+    (transcript: string) => {
       if (gameState !== 'playing' || isPaused || !transcript.trim()) return;
       
       // Check cooldown
@@ -143,7 +148,7 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
       
       markCast();
     }
-  });
+  );
 
   const { isListening, transcript, confidence, loudness, hasPermission, isSupported, interim, final } = voiceRecognition;
 
@@ -151,6 +156,9 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
   useEffect(() => {
     const initSystems = async () => {
       try {
+        // Initialize microphone first
+        await voiceRecognition.primeMic();
+        
         // Initialize audio
         await soundManager.init();
         soundManager.setVolumes({
@@ -235,10 +243,7 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
     
     // Start voice recognition
     try {
-      if (!hasPermission) {
-        await voiceRecognition.primeMic();
-      }
-      await voiceRecognition.start();
+      await voiceRecognition.startListening();
     } catch (error) {
       console.error('Failed to start voice recognition:', error);
     }
