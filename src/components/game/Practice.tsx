@@ -12,7 +12,7 @@ import { DiagnosticOverlay, DiagnosticState } from '@/components/ui/diagnostic-o
 import { CooldownRing } from '@/components/ui/cooldown-ring';
 import { calculateSpellPower } from '@/utils/spellMatcher';
 import { canCastGate, canCast, markCast, getRemainingCooldown } from '@/utils/castGating';
-import { rescoreSpell } from '@/engine/recognition/SpellRescorer';
+import { rescoreSpell, bestOrFallback } from '@/engine/recognition/SpellRescorer';
 import { AudioMeter } from '@/audio/AudioMeter';
 import { SPELL_DATABASE } from '@/data/spells';
 import { Spell, SpellElement, SpellDifficulty } from '@/types/game';
@@ -79,50 +79,56 @@ export const Practice = ({ onBack, isIPSafe }: PracticeProps) => {
   const handleFinal = useCallback((transcript: string, rms: number, dbfs: number) => {
     if (!transcript.trim()) return;
 
-    // Use AutoCaster for consistent casting logic
-    const deps: AutoCasterDeps = {
-      getRms: () => audioMeter?.getRms() || 0,
-      getMinRms: () => audioMeter?.getCalibration().minRms || 0.02,
-      getCooldownMs: () => cooldownMs,
-      hotwordEnabled: () => hotwordEnabled,
-      hotword: () => hotword,
-      now: () => performance.now(),
-      onCast: (payload) => {
-        setLastCastResult({
-          spell: SPELL_DATABASE.find(s => s.id === payload.spellId)!,
-          accuracy: payload.accuracy,
-          power: payload.power,
-          timestamp: performance.now(),
-          matched: !payload.assist,
-          assist: payload.assist || false
-        });
-
-        // Update stats
-        setPracticeStats(prev => ({
-          totalCasts: prev.totalCasts + 1,
-          averageAccuracy: (prev.averageAccuracy * prev.totalCasts + payload.accuracy) / (prev.totalCasts + 1),
-          bestAccuracy: Math.max(prev.bestAccuracy, payload.accuracy)
-        }));
-
-        const spell = SPELL_DATABASE.find(s => s.id === payload.spellId);
-        const toastTitle = !payload.assist ? "Spell Cast!" : "Assist Cast!";
-        const toastDesc = !payload.assist 
-          ? `${spell?.name} - ${Math.round(payload.accuracy * 100)}% accuracy`
-          : `${spell?.name} (fallback) - ${Math.round(payload.power * 100)}% power`;
-        
-        toast({
-          title: toastTitle,
-          description: toastDesc,
-          variant: !payload.assist ? "default" : "secondary"
-        });
-      },
-      onDebug: (msg) => {
-        setBlockReason(msg.split(':')[1]);
-        setBlockDetails(msg.split(' - ')[1]);
-      }
-    };
+    // Use the new rescoring system directly
+    const { entry, score, matched } = bestOrFallback(transcript, 0.4);
+    const spell = SPELL_DATABASE.find(s => s.id === entry.id) || SPELL_DATABASE[0];
     
-    handleFinalTranscript(transcript, deps, 0.4, true);
+    // Check if we can cast (cooldown)
+    if (!canCast(cooldownMs)) {
+      setBlockReason('ON_COOLDOWN');
+      setBlockDetails(`${Math.ceil(getRemainingCooldown(cooldownMs) / 1000)}s remaining`);
+      return;
+    }
+    
+    // Calculate power
+    const normalizedRms = audioMeter?.normalizedRms(rms) || 0;
+    const power = calculateSpellPower(score, rms, normalizedRms, matched);
+    
+    // Mark cast and update state
+    markCast();
+    setLastCastTime(performance.now());
+    setLastTranscript(transcript);
+    
+    setLastCastResult({
+      spell,
+      accuracy: score,
+      power,
+      timestamp: performance.now(),
+      matched,
+      assist: !matched
+    });
+
+    // Update stats
+    setPracticeStats(prev => ({
+      totalCasts: prev.totalCasts + 1,
+      averageAccuracy: (prev.averageAccuracy * prev.totalCasts + score) / (prev.totalCasts + 1),
+      bestAccuracy: Math.max(prev.bestAccuracy, score)
+    }));
+
+    const toastTitle = matched ? "Spell Cast!" : "Assist Cast!";
+    const toastDesc = matched 
+      ? `${spell.name} - ${Math.round(score * 100)}% accuracy`
+      : `${spell.name} (fallback) - ${Math.round(power * 100)}% power`;
+    
+    toast({
+      title: toastTitle,
+      description: toastDesc,
+      variant: matched ? "default" : "secondary"
+    });
+    
+    // Clear block reason on successful cast
+    setBlockReason(undefined);
+    setBlockDetails(undefined);
   }, [lastCastTime, cooldownMs, lastTranscript, hotwordEnabled, hotword, toast, audioMeter]);
 
   // Initialize voice recognition
