@@ -27,7 +27,13 @@ export class NetClient {
     if (!serverUrl) {
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
       const hostname = window.location.hostname;
-      this.serverUrl = `${protocol}//${hostname}:5175`;
+      
+      // Check if port is already embedded in hostname (webcontainer pattern)
+      if (hostname.includes('5175') || hostname.includes('--5175--')) {
+        this.serverUrl = `${protocol}//${hostname}`;
+      } else {
+        this.serverUrl = `${protocol}//${hostname}:5175`;
+      }
     } else {
       this.serverUrl = serverUrl;
     }
