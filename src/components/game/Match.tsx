@@ -245,9 +245,16 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
     
     // Start voice recognition
     try {
+      // Initialize microphone first
+      await voiceRecognition.primeMic();
       await voiceRecognition.startListening();
     } catch (error) {
       console.error('Failed to start voice recognition:', error);
+      toast({
+        title: "Microphone Error",
+        description: "Failed to start voice recognition. Please check microphone permissions.",
+        variant: "destructive",
+      });
     }
     
     // Start bot opponent
@@ -261,7 +268,7 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
     soundManager.music.start('battle_theme');
     
     // Start match timer
-  }, [hasPermission, mode]);
+  }, [mode, voiceRecognition]);
 
   // Match timer effect
   useEffect(() => {
