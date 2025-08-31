@@ -27,7 +27,7 @@ let lastTranscript = "";
 export function handleFinalTranscript(
   finalText: string, 
   deps: AutoCasterDeps, 
-  minAcc = 0.25,
+  minAcc = 0.4,
   alwaysCast = true
 ) {
   const rms = deps.getRms();

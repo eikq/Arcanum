@@ -15,7 +15,7 @@ const DEFAULT_SETTINGS: GameSettings = {
   sensitivity: 0.6,
   hotwordEnabled: false,
   ipSafeMode: false,
-  minAccuracy: 0.25,
+  minAccuracy: 0.4,
   alwaysCast: true,
   micSensitivity: 0.02,
   masterVolume: 0.8,

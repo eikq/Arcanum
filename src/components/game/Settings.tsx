@@ -265,8 +265,8 @@ export const Settings = ({ settings, onSettingsChange, onBack }: SettingsProps) 
                     ...settings,
                     minAccuracy: 1 - (value / 100)
                   })}
-                  min={15}
-                  max={60}
+                  min={35}
+                  max={75}
                   step={5}
                   className="w-full"
                 />

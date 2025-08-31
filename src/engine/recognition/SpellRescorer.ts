@@ -68,7 +68,7 @@ export function rescoreSpell(transcript:string, topN=3): RescoreResult[] {
 }
 
 // Convenience: pick top or fallback
-export function bestOrFallback(transcript:string, minScore=0.25){
+export function bestOrFallback(transcript:string, minScore=0.4){
   const [top] = rescoreSpell(transcript, 1);
   if(!top || top.score < minScore){
     const fb = HP_SPELL_LEXICON.find(x=>x.id==="expelliarmus") ?? HP_SPELL_LEXICON[0]; // choose something safe

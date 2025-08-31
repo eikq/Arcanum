@@ -122,7 +122,7 @@ export const Practice = ({ onBack, isIPSafe }: PracticeProps) => {
       }
     };
     
-    handleFinalTranscript(transcript, deps, 0.25, true);
+    handleFinalTranscript(transcript, deps, 0.4, true);
   }, [lastCastTime, cooldownMs, lastTranscript, hotwordEnabled, hotword, toast, audioMeter]);
 
   // Initialize voice recognition
