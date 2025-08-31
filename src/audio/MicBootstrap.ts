@@ -381,7 +381,7 @@ class MicBootstrapManager {
 }
 
 // Singleton instance
-const micBootstrap = new MicBootstrapManager();
+export const micBootstrap = new MicBootstrapManager();
 
 // Public API
 export async function acquireMic(preferredDeviceId?: string): Promise<MicState> {
