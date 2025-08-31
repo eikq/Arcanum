@@ -709,6 +709,7 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
                 
                 {final && (
                   <div className="text-sm text-nature font-medium">
+                <div className="flex items-center gap-4">
                     ✓ {final}
                   </div>
                 )}
@@ -722,6 +723,24 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
                     ))}
                   </div>
                 )}
+                
+                {/* Manual Mic Toggle for Debugging */}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    if (isListening) {
+                      voiceRecognition.stopListening();
+                    } else {
+                      voiceRecognition.startListening();
+                    }
+                  }}
+                  className="gap-2"
+                >
+                  {isListening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+                  {isListening ? 'Stop' : 'Start'}
+                </Button>
+                </div>
               </div>
             </div>
             
