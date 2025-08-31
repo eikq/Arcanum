@@ -8,6 +8,7 @@ import { Match } from './Match';
 import { Lobby } from './Lobby';
 import { GameSettings } from '@/types/game';
 import { netClient } from '@/network/NetClient';
+import { soundManager } from '@/audio/SoundManager';
 
 // Default game settings
 const DEFAULT_SETTINGS: GameSettings = {
@@ -48,6 +49,34 @@ export const GameEngine = () => {
   useEffect(() => {
     localStorage.setItem('arcanum-settings', JSON.stringify(gameSettings));
   }, [gameSettings]);
+
+  // Force AudioContext resume on first user interaction
+  useEffect(() => {
+    const handleFirstInteraction = async () => {
+      console.log('🎵 First user interaction detected, attempting to resume AudioContext...');
+      try {
+        await soundManager.resumeAudioContext();
+        console.log('✅ AudioContext resumed successfully');
+      } catch (error) {
+        console.error('❌ Failed to resume AudioContext:', error);
+      }
+      
+      // Remove listeners after first interaction
+      document.removeEventListener('click', handleFirstInteraction);
+      document.removeEventListener('keydown', handleFirstInteraction);
+      document.removeEventListener('touchstart', handleFirstInteraction);
+    };
+
+    document.addEventListener('click', handleFirstInteraction);
+    document.addEventListener('keydown', handleFirstInteraction);
+    document.addEventListener('touchstart', handleFirstInteraction);
+
+    return () => {
+      document.removeEventListener('click', handleFirstInteraction);
+      document.removeEventListener('keydown', handleFirstInteraction);
+      document.removeEventListener('touchstart', handleFirstInteraction);
+    };
+  }, []);
 
   // FIX: Initialize network connection and listen for state changes
   useEffect(() => {

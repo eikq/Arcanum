@@ -26,6 +26,7 @@ export class SoundManager {
   private isInitialized = false;
   private audioContext: AudioContext | null = null; // NEW: add audioContext
   private isMuted = false;
+  private initializationAttempted = false;
 
   // Sound data URIs - minimal demo sounds
   private soundData: Record<string, string> = {
@@ -100,22 +101,47 @@ export class SoundManager {
   };
 
   async init(): Promise<void> {
+    console.log('🎵 SoundManager.init() called');
+    console.log('🎵 isInitialized:', this.isInitialized);
+    console.log('🎵 initializationAttempted:', this.initializationAttempted);
+    
     if (this.isInitialized) return;
+    
+    this.initializationAttempted = true;
 
     try {
       // Initialize AudioContext for procedural sounds
+      console.log('🎵 Creating AudioContext...');
       this.audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+      console.log('🎵 AudioContext created, state:', this.audioContext.state);
+      
+      // Try to resume AudioContext immediately
+      if (this.audioContext.state === 'suspended') {
+        console.log('🎵 AudioContext suspended, attempting to resume...');
+        try {
+          await this.audioContext.resume();
+          console.log('🎵 AudioContext resumed, new state:', this.audioContext.state);
+        } catch (resumeError) {
+          console.warn('⚠️ Failed to resume AudioContext during init:', resumeError);
+        }
+      }
+      
       // Load all sound effects
+      console.log('🎵 Loading sound effects...');
       for (const [id, dataUri] of Object.entries(this.soundData)) {
+        console.log(`🎵 Loading sound: ${id}`);
         const howl = new Howl({
           src: [dataUri],
           volume: this.sfxVolume * this.masterVolume,
           preload: true,
+          onload: () => console.log(`✅ Sound loaded: ${id}`),
+          onloaderror: (id, error) => console.error(`❌ Failed to load sound ${id}:`, error),
         });
         this.sounds.set(id, howl);
       }
 
       // Load music tracks (simple tones for demo)
+      console.log('🎵 Loading music tracks...');
       const musicData = {
         menu_ambient: this.generateAmbient(220, 60), // 1 minute ambient
         match_intense: this.generateAmbient(440, 120), // 2 minute battle music
@@ -123,58 +149,108 @@ export class SoundManager {
       };
 
       for (const [id, dataUri] of Object.entries(musicData)) {
+        console.log(`🎵 Loading music: ${id}`);
         const howl = new Howl({
           src: [dataUri],
           volume: this.musicVolume * this.masterVolume,
           loop: true,
           preload: true,
+          onload: () => console.log(`✅ Music loaded: ${id}`),
+          onloaderror: (id, error) => console.error(`❌ Failed to load music ${id}:`, error),
         });
         this.musicTracks.set(id, howl);
       }
 
       this.isInitialized = true;
+      console.log('✅ SoundManager initialization complete');
+      console.log('🎵 Total sounds loaded:', this.sounds.size);
+      console.log('🎵 Total music tracks loaded:', this.musicTracks.size);
     } catch (error) {
-      console.warn('Failed to initialize audio:', error);
+      console.error('❌ Failed to initialize audio:', error);
+      console.error('🎵 AudioContext state:', this.audioContext?.state);
+    }
+  }
+
+  // Method to resume AudioContext (for browser autoplay policy)
+  async resumeAudioContext(): Promise<void> {
+    if (!this.audioContext) {
+      console.log('🎵 No AudioContext to resume');
+      return;
+    }
+    
+    console.log('🎵 Current AudioContext state:', this.audioContext.state);
+    
+    if (this.audioContext.state === 'suspended') {
+      try {
+        await this.audioContext.resume();
+        console.log('✅ AudioContext resumed successfully, new state:', this.audioContext.state);
+      } catch (error) {
+        console.error('❌ Failed to resume AudioContext:', error);
+        throw error;
+      }
+    } else {
+      console.log('🎵 AudioContext already running');
     }
   }
 
   // NEW: Enhanced API for AutoCaster integration
   playUI(id: "click" | "back" | "error"): void {
+    console.log(`🎵 playUI called: ${id}`);
+    console.log('🎵 isInitialized:', this.isInitialized, 'isMuted:', this.isMuted);
+    
     if (!this.isInitialized || this.isMuted) return;
 
     const soundId = `ui_${id}`;
     const sound = this.sounds.get(soundId);
+    console.log(`🎵 Found sound for ${soundId}:`, !!sound);
+    
     if (sound) {
-      sound.volume(this.sfxVolume * this.masterVolume * 0.5);
+      const volume = this.sfxVolume * this.masterVolume * 0.8; // Increased volume
+      console.log(`🎵 Playing ${soundId} at volume:`, volume);
+      sound.volume(volume);
       sound.play();
+    } else {
+      console.warn(`⚠️ Sound not found: ${soundId}`);
     }
   }
 
   play(kind: "cast" | "impact", element?: ElementKey, opts?: { gain?: number; pitch?: number }): void {
+    console.log(`🎵 play called: ${kind}, element: ${element}`);
+    console.log('🎵 isInitialized:', this.isInitialized, 'isMuted:', this.isMuted);
+    
     if (!this.isInitialized || this.isMuted) return;
     
     if (kind === "cast" && element) {
-      this.playCast(element, opts?.gain || 0.8, { 
+      console.log(`🎵 Playing cast sound for ${element}`);
+      this.playCast(element, opts?.gain || 1.0, { 
         volume: opts?.gain, 
         pitch: opts?.pitch 
       });
     } else if (kind === "impact" && element) {
+      console.log(`🎵 Playing impact sound for ${element}`);
       this.playImpact(element, { 
         volume: opts?.gain, 
         pitch: opts?.pitch 
       });
+    } else {
+      console.warn(`⚠️ Invalid play parameters: kind=${kind}, element=${element}`);
     }
   }
 
   music = {
     start: (id: "battle_theme" | "menu_ambient" | "victory") => {
+      console.log(`🎵 music.start called: ${id}`);
+      console.log('🎵 isInitialized:', this.isInitialized, 'isMuted:', this.isMuted);
+      
       if (!this.isInitialized || this.isMuted) return;
       this.playMusic(id);
     },
     stop: () => {
+      console.log('🎵 music.stop called');
       this.stopMusic();
     },
     setVolume: (v: number) => {
+      console.log('🎵 music.setVolume called:', v);
       this.setMusicVolume(v);
     }
   };
@@ -242,7 +318,10 @@ export class SoundManager {
 
   // Cast sound with elemental layers
   playCast(element: SpellElement, loudness: number = 0.8, config: SoundConfig = {}): void {
+    console.log(`🎵 playCast called: element=${element}, loudness=${loudness}`);
+    
     if (!this.isInitialized) {
+      console.log('🎵 Not initialized, using procedural sound fallback');
       // Fallback to procedural sound
       this.playElementSound(element, 'cast', loudness);
       return;
@@ -250,16 +329,19 @@ export class SoundManager {
 
     const elementSounds = this.elementalSounds[element];
     if (!elementSounds) {
+      console.log(`🎵 No element sounds for ${element}, using procedural fallback`);
       this.playElementSound(element, 'cast', loudness);
       return;
     }
 
+    console.log(`🎵 Playing ${elementSounds.cast.length} cast sounds for ${element}`);
+    
     // Play cast sounds with loudness-based volume and pitch variation
     elementSounds.cast.forEach((soundId, index) => {
       const sound = this.sounds.get(soundId);
       if (sound) {
         // Logarithmic volume curve for loudness
-        const volume = Math.pow(loudness, 0.5) * this.sfxVolume * this.masterVolume;
+        const volume = Math.pow(loudness, 0.5) * this.sfxVolume * this.masterVolume * 1.5; // Increased volume
         
         // Small pitch variation (±3%)
         const pitchVariation = 0.97 + Math.random() * 0.06;
@@ -267,11 +349,16 @@ export class SoundManager {
         // Slight delay for layering
         const delay = index * 50;
 
+        console.log(`🎵 Scheduling ${soundId} with volume ${volume} in ${delay}ms`);
+        
         setTimeout(() => {
           sound.volume(volume * (config.volume || 1));
           sound.rate(pitchVariation * (config.pitch || 1));
+          console.log(`🎵 Playing ${soundId} now`);
           sound.play();
         }, delay);
+      } else {
+        console.warn(`⚠️ Sound not found: ${soundId}`);
       }
     });
   }
@@ -313,13 +400,22 @@ export class SoundManager {
 
   // Music control
   playMusic(trackId: string, fadeIn: number = 1000): void {
+    console.log(`🎵 playMusic called: ${trackId}`);
+    
     if (!this.isInitialized) return;
 
     const track = this.musicTracks.get(trackId);
-    if (!track) return;
+    if (!track) {
+      console.warn(`⚠️ Music track not found: ${trackId}`);
+      console.log('🎵 Available tracks:', Array.from(this.musicTracks.keys()));
+      return;
+    }
 
+    console.log(`🎵 Found track ${trackId}, starting playback`);
+    
     // Stop current music
     if (this.currentMusic) {
+      console.log('🎵 Stopping current music');
       this.currentMusic.fade(this.currentMusic.volume(), 0, fadeIn / 2);
       setTimeout(() => {
         if (this.currentMusic) {
@@ -329,9 +425,11 @@ export class SoundManager {
     }
 
     // Start new music
+    const finalVolume = this.musicVolume * this.masterVolume;
+    console.log(`🎵 Starting ${trackId} with volume ${finalVolume}`);
     track.volume(0);
     track.play();
-    track.fade(0, this.musicVolume * this.masterVolume, fadeIn);
+    track.fade(0, finalVolume, fadeIn);
     this.currentMusic = track;
   }
 
