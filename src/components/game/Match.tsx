@@ -156,6 +156,32 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
     }
   );
 
+  // Handle mic toggle with proper async handling
+  const handleMicToggle = useCallback(async () => {
+    try {
+      if (isListening) {
+        voiceRecognition.stop();
+        toast({
+          title: "Microphone Stopped",
+          description: "Voice recognition has been stopped",
+        });
+      } else {
+        await voiceRecognition.start();
+        toast({
+          title: "Microphone Started", 
+          description: "Voice recognition is now active",
+        });
+      }
+    } catch (error) {
+      console.error('Failed to toggle microphone:', error);
+      toast({
+        title: "Microphone Error",
+        description: "Failed to toggle microphone. Try refreshing the page.",
+        variant: "destructive",
+      });
+    }
+  }, [isListening, voiceRecognition]);
+
   const { isListening, transcript, confidence, loudness, hasPermission, isSupported, interim, final } = voiceRecognition;
 
   // Initialize systems
@@ -729,14 +755,11 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => {
-                    if (isListening) {
-                      voiceRecognition.stopListening();
-                    } else {
-                      voiceRecognition.startListening();
-                    }
-                  }}
+                  onClick={handleMicToggle}
+                  onMouseDown={(e) => e.preventDefault()}
+                  onTouchStart={(e) => e.preventDefault()}
                   className="gap-2"
+                  disabled={!hasPermission}
                 >
                   {isListening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
                   {isListening ? 'Stop' : 'Start'}
