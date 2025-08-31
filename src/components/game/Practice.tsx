@@ -57,20 +57,8 @@ export const Practice = ({ onBack, isIPSafe }: PracticeProps) => {
 
   const { toast } = useToast();
 
-  // Initialize audio meter
-  useEffect(() => {
-    import('@/audio/AudioMeter').then(({ AudioMeter }) => {
-      const meter = new AudioMeter();
-      meter.start();
-      setAudioMeter(meter);
-      
-      return () => {
-        meter.destroy();
-      };
-    });
-  }, []);
   // Enhanced interim callback for live spell guesses
-  const handleInterim = useCallback((transcript: string) => {
+  const handleInterim = useCallback((transcript: string, rms: number, dbfs: number) => {
     if (!transcript.trim()) {
       setTopGuesses([]);
       return;
@@ -86,17 +74,17 @@ export const Practice = ({ onBack, isIPSafe }: PracticeProps) => {
   }, []);
 
   // Enhanced final callback with cast gating
-  const handleFinal = useCallback((transcript: string) => {
+  const handleFinal = useCallback((transcript: string, rms: number, dbfs: number) => {
     if (!transcript.trim()) return;
 
     const now = performance.now();
     const calibration = audioMeter?.getCalibration();
-    const normalizedRms = audioMeter?.normalizedRms(voiceState.loudness) || 0;
+    const normalizedRms = audioMeter?.normalizedRms(rms) || 0;
     
     // Apply cast gating
     const gateResult = canCastGate({
       isFinal: true,
-      rms: voiceState.loudness,
+      rms: rms,
       finalTranscript: transcript,
       now,
       lastCastTs: lastCastTime,
@@ -131,7 +119,7 @@ export const Practice = ({ onBack, isIPSafe }: PracticeProps) => {
 
     // Use match or fallback system
     const result = matchOrFallback(transcript, { minScore: 0.25 });
-    const power = calculateSpellPower(result.score, voiceState.loudness, normalizedRms, result.matched);
+    const power = calculateSpellPower(result.score, rms, normalizedRms, result.matched);
     
     if (power > 0) {
       setLastCastResult({
@@ -166,7 +154,7 @@ export const Practice = ({ onBack, isIPSafe }: PracticeProps) => {
         variant: result.matched ? "default" : "secondary"
       });
     }
-  }, [lastCastTime, cooldownMs, lastTranscript, hotwordEnabled, hotword, toast, audioMeter, voiceState.loudness]);
+  }, [lastCastTime, cooldownMs, lastTranscript, hotwordEnabled, hotword, toast, audioMeter]);
 
   // Initialize voice recognition
   const voiceState = useVoiceRecognition(
@@ -176,6 +164,19 @@ export const Practice = ({ onBack, isIPSafe }: PracticeProps) => {
     handleInterim,
     handleFinal
   );
+
+  // Initialize audio meter
+  useEffect(() => {
+    import('@/audio/AudioMeter').then(({ AudioMeter }) => {
+      const meter = new AudioMeter();
+      meter.start();
+      setAudioMeter(meter);
+      
+      return () => {
+        meter.destroy();
+      };
+    });
+  }, []);
 
   // Auto-start mic detection and SR on mount
   useEffect(() => {

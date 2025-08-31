@@ -154,7 +154,7 @@ export const useVoiceRecognition = (
             setFinal(transcript);
             setTranscript(transcript);
             setConfidence(confidence);
-            onFinalCallback?.(transcript);
+            onFinalCallback?.(transcript, micStateRef.current?.rms || 0, micStateRef.current?.dbfs || -60);
             onResult?.(transcript, confidence, loudness);
 
             // Clear interim after final
@@ -167,7 +167,7 @@ export const useVoiceRecognition = (
         // Update interim transcript
         if (interimTranscript) {
           setInterim(interimTranscript);
-          onInterimCallback?.(interimTranscript);
+          onInterimCallback?.(interimTranscript, micStateRef.current?.rms || 0, micStateRef.current?.dbfs || -60);
         }
       };
     } else {
