@@ -792,15 +792,6 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
               </div>
             </div>
             
-            {/* Spell List */}
-            <div className="flex justify-center lg:justify-start">
-              <SpellList 
-                isCollapsed={spellListCollapsed}
-                onToggleCollapse={() => setSpellListCollapsed(!spellListCollapsed)}
-                className="w-full max-w-80"
-              />
-            </div>
-            
             {/* Cast Feed */}
             <div className="flex justify-center lg:justify-end">
               <CastFeed items={castHistory} className="w-full max-w-80" />
