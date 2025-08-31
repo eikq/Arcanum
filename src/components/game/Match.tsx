@@ -191,16 +191,12 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
     const initSystems = async () => {
       try {
         // Initialize audio
-        console.log('🎵 Initializing sound manager...');
         await soundManager.init();
-        console.log('🎵 Sound manager initialized');
-        
         soundManager.setVolumes({
-          ui: settings.masterVolume || 1.0,
+          ui: settings.masterVolume || 0.8,
           sfx: settings.sfxVolume || 0.8,
           music: settings.musicVolume || 0.6
         });
-        console.log('🎵 Sound volumes set');
         
         // Initialize audio meter
         const meter = new AudioMeter();
@@ -348,12 +344,10 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
       setTotalDamageDealt(prev => prev + damage);
       
       // Play cast sound effect
-      console.log('🎵 Playing cast sound for:', spell.element);
       soundManager.playCast(spell.element, payload.loudness);
       
       // Play impact sound after projectile delay
       setTimeout(() => {
-        console.log('🎵 Playing impact sound for:', spell.element);
         soundManager.playImpact(spell.element);
       }, 800);
     }
@@ -448,10 +442,8 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
       setTotalDamageTaken(prev => prev + damage);
       
       // Play opponent cast and impact sounds
-      console.log('🎵 Playing opponent cast sound for:', spell.element);
       soundManager.playCast(spell.element, castData.loudness || 0.8);
       setTimeout(() => {
-        console.log('🎵 Playing opponent impact sound for:', spell.element);
         soundManager.playImpact(spell.element);
       }, 800);
     }
@@ -761,6 +753,7 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
                   dbfs={audioMeterRef.current?.getDbfs() || -60}
                   normalizedRms={audioMeterRef.current?.normalizedRms(audioMeterRef.current?.getRms() || 0) || 0}
                   calibration={audioMeterRef.current?.getCalibration()}
+                  muted={!isListening}
                 />
               </CooldownRing>
             </div>
