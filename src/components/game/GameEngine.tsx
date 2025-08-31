@@ -5,7 +5,9 @@ import { Settings } from './Settings';
 import { HowToPlay } from './HowToPlay';
 import { PlayMenu } from './PlayMenu';
 import { Match } from './Match';
+import { Lobby } from './Lobby';
 import { GameSettings } from '@/types/game';
+import { netClient } from '@/network/NetClient';
 
 // Default game settings
 const DEFAULT_SETTINGS: GameSettings = {
@@ -23,6 +25,8 @@ const DEFAULT_SETTINGS: GameSettings = {
 
 export const GameEngine = () => {
   const [currentScreen, setCurrentScreen] = useState('main-menu');
+  const [isConnected, setIsConnected] = useState(false);
+  const [currentRoomId, setCurrentRoomId] = useState<string | null>(null);
   const [gameSettings, setGameSettings] = useState<GameSettings>(() => {
     // Load settings from localStorage
     const saved = localStorage.getItem('arcanum-settings');
@@ -40,6 +44,31 @@ export const GameEngine = () => {
   useEffect(() => {
     localStorage.setItem('arcanum-settings', JSON.stringify(gameSettings));
   }, [gameSettings]);
+
+  // FIX: Initialize network connection and listen for state changes
+  useEffect(() => {
+    const handleConnectionChange = (state: 'disconnected' | 'connecting' | 'connected') => {
+      setIsConnected(state === 'connected');
+    };
+
+    // Connect to server when component mounts
+    const initializeConnection = async () => {
+      try {
+        await netClient.connect();
+        setIsConnected(netClient.isConnected());
+      } catch (error) {
+        console.warn('Failed to connect to game server:', error);
+        setIsConnected(false);
+      }
+    };
+
+    netClient.on('connection_changed', handleConnectionChange);
+    initializeConnection();
+
+    return () => {
+      netClient.off('connection_changed', handleConnectionChange);
+    };
+  }, []);
 
   const handleNavigate = useCallback((screen: string) => {
     setCurrentScreen(screen);
@@ -67,14 +96,29 @@ export const GameEngine = () => {
         return (
           <PlayMenu 
             onBack={() => handleNavigate('main-menu')}
-            onStartMatch={(mode, data) => {
-              // NEW: Route to Match component
-              if (mode === 'bot') {
-                setCurrentScreen(`match:bot:${data?.difficulty || 'medium'}`);
-              } else {
-                setCurrentScreen(`match:${mode}`);
+            isConnected={isConnected}
+            onStartMatch={async (mode, data) => {
+              // FIX: Handle actual network calls for online matches
+              try {
+                if (mode === 'bot') {
+                  setCurrentScreen(`match:bot:${data?.difficulty || 'medium'}`);
+                } else if (mode === 'quick') {
+                  const roomId = await netClient.quickMatch(data?.nick || 'Player');
+                  setCurrentRoomId(roomId);
+                  setCurrentScreen('lobby');
+                } else if (mode === 'create') {
+                  const roomId = await netClient.createRoom(data?.nick || 'Host');
+                  setCurrentRoomId(roomId);
+                  setCurrentScreen('lobby');
+                } else if (mode === 'join') {
+                  const roomId = await netClient.joinRoom(data?.roomCode, data?.nick || 'Player');
+                  setCurrentRoomId(roomId);
+                  setCurrentScreen('lobby');
+                }
+              } catch (error) {
+                console.error('Failed to start match:', error);
+                // Keep on play menu and let PlayMenu show error
               }
-              console.log('Starting match:', mode, data);
             }}
           />
         );
@@ -95,16 +139,57 @@ export const GameEngine = () => {
           />
         );
         
+      case 'lobby':
+        return (
+          <Lobby 
+            roomId={currentRoomId || ''}
+            onBack={() => {
+              if (currentRoomId) {
+                netClient.leaveRoom();
+                setCurrentRoomId(null);
+              }
+              handleNavigate('play-menu');
+            }}
+            onMatchStart={() => {
+              setCurrentScreen('match');
+            }}
+          />
+        );
+        
       default:
-        // NEW: Handle match screens
+        // FIX: Handle match screens with proper routing
         if (currentScreen.startsWith('match:')) {
           const [, mode, difficulty] = currentScreen.split(':');
           return (
             <Match
               mode={mode as 'quick' | 'bot' | 'code'}
               settings={gameSettings}
-              onBack={() => handleNavigate('main-menu')}
+              onBack={() => {
+                if (currentRoomId) {
+                  netClient.leaveRoom();
+                  setCurrentRoomId(null);
+                }
+                handleNavigate('main-menu');
+              }}
               botDifficulty={difficulty as 'easy' | 'medium' | 'hard'}
+              roomId={currentRoomId}
+            />
+          );
+        }
+        
+        if (currentScreen === 'match') {
+          return (
+            <Match
+              mode="quick"
+              settings={gameSettings}
+              onBack={() => {
+                if (currentRoomId) {
+                  netClient.leaveRoom();
+                  setCurrentRoomId(null);
+                }
+                handleNavigate('main-menu');
+              }}
+              roomId={currentRoomId}
             />
           );
         }

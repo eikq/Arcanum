@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { Badge } from '@/components/ui/badge';
-import { Card, CardContent } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { toast } from '@/hooks/use-toast';
 import { VoiceIndicator } from './VoiceIndicator';
 import { useVoiceRecognition } from '@/hooks/useVoiceRecognition';
@@ -16,6 +16,8 @@ import { createVFXManager } from '@/vfx/VFXManager';
 import { createBotOpponent, BotOpponent } from '@/ai/BotOpponent';
 import { netClient } from '@/network/NetClient';
 import { voiceChat } from '@/network/VoiceChat';
+import type { RoomSnapshot, CastPayload } from '@/shared/net';
+import { makeServerTimer } from '@/shared/net';
 import { 
   Volume2, VolumeX, Pause, Play, Settings, 
   Mic, MicOff, Shield, Heart, Zap, 
@@ -52,11 +54,13 @@ interface CastHistory {
 }
 
 export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId }: MatchProps) => {
-  // Game state
-  const [gameState, setGameState] = useState<'countdown' | 'active' | 'paused' | 'ended'>('countdown');
-  const [countdown, setCountdown] = useState(3);
+  // FIX: Server-synced game state
+  const [gameState, setGameState] = useState<'lobby' | 'countdown' | 'playing' | 'finished'>('countdown');
+  const [countdown, setCountdown] = useState<number | null>(null);
+  const [roundTimer, setRoundTimer] = useState<number | null>(null);
   const [isPaused, setIsPaused] = useState(false);
   const [winner, setWinner] = useState<string | null>(null);
+  const [roomSnapshot, setRoomSnapshot] = useState<RoomSnapshot | null>(null);
   
   // Players
   const [players, setPlayers] = useState<Player[]>([
@@ -96,7 +100,7 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
   
   // Voice recognition
   const voiceRecognition = useVoiceRecognition((transcript, confidence, loudness) => {
-    if (gameState !== 'active' || isPaused || !transcript.trim()) return;
+    if (gameState !== 'playing' || isPaused || !transcript.trim()) return;
     
     const matches = findSpellMatches(transcript, settings.sensitivity || 0.6);
     if (matches.length > 0 && confidence > 0.5) {
@@ -108,12 +112,119 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
   
   const { isListening, transcript, confidence, loudness, hasPermission, isSupported } = voiceRecognition;
 
-  // FIX: Auto-start voice recognition on match start
+  // FIX: Handle network events for online matches
   useEffect(() => {
-    if (gameState === 'active' && voiceRecognition.autoStartListening) {
+    if (mode === 'bot') return; // Skip network events for bot matches
+    
+    const handleRoomUpdate = (snapshot: RoomSnapshot) => {
+      setRoomSnapshot(snapshot);
+      
+      // Update player states from server
+      setPlayers(prev => {
+        const updated = [...prev];
+        snapshot.players.forEach((serverPlayer, index) => {
+          if (updated[index]) {
+            updated[index] = {
+              ...updated[index],
+              hp: serverPlayer.hp,
+              mana: serverPlayer.mana,
+              name: serverPlayer.nick || updated[index].name
+            };
+          }
+        });
+        return updated;
+      });
+    };
+
+    const handleMatchStart = (data: { roomId: string; countdownEndsAt: number }) => {
+      setGameState('countdown');
+      const getTimer = makeServerTimer(data.countdownEndsAt, () => netClient.getServerOffset());
+      
+      const updateCountdown = () => {
+        const remaining = Math.ceil(getTimer() / 1000);
+        setCountdown(remaining);
+        
+        if (remaining <= 0) {
+          setCountdown(null);
+          // Wait for match:playing event
+        } else {
+          setTimeout(updateCountdown, 100);
+        }
+      };
+      updateCountdown();
+    };
+
+    const handleMatchPlaying = (data: { roomId: string; roundEndsAt: number }) => {
+      setGameState('playing');
+      setCountdown(null);
+      
+      // Auto-start voice recognition
+      if (voiceRecognition.autoStartListening) {
+        voiceRecognition.autoStartListening();
+      }
+      
+      const getTimer = makeServerTimer(data.roundEndsAt, () => netClient.getServerOffset());
+      
+      const updateTimer = () => {
+        const remaining = Math.ceil(getTimer() / 1000);
+        setRoundTimer(remaining);
+        
+        if (remaining > 0 && gameState === 'playing') {
+          setTimeout(updateTimer, 1000);
+        }
+      };
+      updateTimer();
+    };
+
+    const handleMatchFinished = (data: { roomId: string; winner?: string }) => {
+      setGameState('finished');
+      setWinner(data.winner || null);
+      setRoundTimer(null);
+      
+      // FIX: Stop voice recognition and voice chat
+      voiceRecognition.stopListening();
+      voiceChat.disconnect();
+      
+      // Stop bot if running
+      if (botOpponentRef.current) {
+        botOpponentRef.current.stop();
+      }
+      
+      soundManager.stopMusic();
+      if (data.winner === netClient.currentRoom) {
+        soundManager.playMusic('victory');
+      }
+    };
+
+    const handleNetworkCast = (cast: CastPayload & { from: string }) => {
+      // Only handle casts from other players
+      if (cast.from !== netClient.currentRoom) {
+        handleOpponentCast({
+          spellId: cast.spellId,
+          accuracy: cast.accuracy,
+          power: cast.power,
+          loudness: cast.loudness,
+          ts: cast.ts,
+          isBot: false
+        });
+      }
+    };
+
+    netClient.on('room_updated', handleRoomUpdate);
+    netClient.on('cast_received', handleNetworkCast);
+
+    return () => {
+      netClient.off('room_updated', handleRoomUpdate);
+      netClient.off('cast_received', handleNetworkCast);
+    };
+  }, [mode, gameState, voiceRecognition.autoStartListening, voiceRecognition.stopListening]);
+
+  // FIX: Auto-start voice recognition for bot matches
+  useEffect(() => {
+    if (mode === 'bot' && gameState === 'playing' && voiceRecognition.autoStartListening) {
       voiceRecognition.autoStartListening();
     }
-  }, [gameState, voiceRecognition.autoStartListening]);
+  }, [mode, gameState, voiceRecognition.autoStartListening]);
 
   // Initialize systems
   useEffect(() => {
@@ -172,27 +283,31 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
     };
   }, []);
 
-  // Start countdown
+  // FIX: Start countdown only for bot matches (online matches get server events)
   const startCountdown = useCallback(() => {
+    if (mode !== 'bot') return; // Online matches handled by server events
+    
     setGameState('countdown');
     setCountdown(3);
     
     const countdownInterval = setInterval(() => {
       setCountdown(prev => {
-        if (prev <= 1) {
+        if (prev !== null && prev <= 1) {
           clearInterval(countdownInterval);
           startMatch();
-          return 0;
+          return null;
         }
         soundManager.playUI('click');
-        return prev - 1;
+        return prev !== null ? prev - 1 : null;
       });
     }, 1000);
-  }, []);
+  }, [mode]);
 
-  // Start match
+  // Start match (bot only)
   const startMatch = useCallback(() => {
-    setGameState('active');
+    if (mode !== 'bot') return;
+    
+    setGameState('playing');
     matchStartTimeRef.current = Date.now();
     
     // Voice recognition starts automatically
@@ -209,7 +324,7 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
     
     // Start match timer
     const timerInterval = setInterval(() => {
-      if (gameState === 'active' && !isPaused) {
+      if (gameState === 'playing' && !isPaused) {
         setMatchDuration(prev => prev + 1);
       }
     }, 1000);
@@ -220,6 +335,9 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
   // Handle spell casting
   const handleCast = useCallback((spellId: string, accuracy: number, loudness: number, power: number) => {
     const now = performance.now();
+    
+    // FIX: Only allow casts during playing state
+    if (gameState !== 'playing') return;
     
     // Check global cooldown
     if (globalCooldown) {
@@ -317,16 +435,20 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
       setTimeout(() => setShowingDamage(null), 2000);
     }
     
-    // Send to network (multiplayer)
-    if (mode !== 'bot') {
-      netClient.sendCast({
-        roomId: roomId || '',
+    // FIX: Send to network with validation (multiplayer)
+    if (mode !== 'bot' && roomId) {
+      const success = netClient.sendCast({
+        roomId,
         spellId,
         accuracy,
         loudness,
         power,
         ts: now
       });
+      
+      if (!success) {
+        console.warn('Failed to send cast - cooldown or connection issue');
+      }
     }
     
   }, [globalCooldown, spellCooldowns, lastCastTime, mode, roomId]);
@@ -407,12 +529,12 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
     setPlayers(prev => prev.map(player => {
       if (player.id === playerId) {
         const newHp = Math.max(0, player.hp - amount);
-        if (newHp === 0 && gameState === 'active') {
+        if (newHp === 0 && gameState === 'playing') {
           // Player defeated
           const winnerId = playerId === 'player1' ? 'player2' : 'player1';
           const winnerName = players.find(p => p.id === winnerId)?.name || 'Unknown';
           setWinner(winnerName);
-          setGameState('ended');
+          setGameState('finished');
           soundManager.stopMusic();
           
           if (winnerId === 'player1') {
@@ -436,7 +558,7 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
 
   // Pause/resume
   const togglePause = useCallback(() => {
-    if (gameState !== 'active') return;
+    if (gameState !== 'playing') return;
     
     setIsPaused(prev => {
       const newPaused = !prev;
@@ -482,6 +604,62 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
 
   const player1 = players[0];
   const player2 = players[1];
+
+  // FIX: Handle finished state with results screen
+  if (gameState === 'finished') {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-primary/20 via-background to-secondary/20 flex items-center justify-center p-4">
+        <Card className="w-full max-w-2xl text-center">
+          <CardHeader>
+            <CardTitle className="text-4xl mb-4">
+              {winner === 'You' ? '🏆 Victory!' : winner ? '💀 Defeat' : '⚔️ Draw'}
+            </CardTitle>
+            <CardDescription className="text-lg">
+              {winner === 'You' && 'Your voice magic proved superior!'}
+              {winner && winner !== 'You' && `${winner} emerged victorious!`}
+              {!winner && 'An honorable battle with no clear victor.'}
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-6">
+            {/* Match Stats */}
+            <div className="grid grid-cols-2 gap-4 text-sm">
+              <div className="bg-muted/50 p-3 rounded-lg">
+                <div className="font-semibold">Spells Cast</div>
+                <div className="text-2xl">{castHistory.filter(c => c.playerId === 'player1').length}</div>
+              </div>
+              <div className="bg-muted/50 p-3 rounded-lg">
+                <div className="font-semibold">Accuracy</div>
+                <div className="text-2xl">
+                  {Math.round((castHistory.filter(c => c.playerId === 'player1').reduce((acc, c) => acc + c.accuracy, 0) / Math.max(1, castHistory.filter(c => c.playerId === 'player1').length)) * 100)}%
+                </div>
+              </div>
+            </div>
+            
+            <div className="flex gap-4 justify-center">
+              <Button onClick={() => {
+                // Reset match state for rematch
+                setGameState('countdown');
+                setPlayers([
+                  { id: 'player1', name: 'You', hp: 100, maxHp: 100, mana: 100, maxMana: 100 },
+                  { id: 'player2', name: mode === 'bot' ? 'Bot' : 'Opponent', hp: 100, maxHp: 100, mana: 100, maxMana: 100, isBot: mode === 'bot' }
+                ]);
+                setCastHistory([]);
+                setWinner(null);
+                if (mode === 'bot') {
+                  startCountdown();
+                }
+              }}>
+                Rematch
+              </Button>
+              <Button variant="outline" onClick={onBack}>
+                Back to Menu
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   if (gameState === 'countdown') {
     return (
@@ -754,46 +932,6 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
                 </Button>
                 <Button onClick={onBack} variant="outline" className="w-full">
                   Exit Match
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-      )}
-
-      {/* Game End Overlay */}
-      {gameState === 'ended' && (
-        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50">
-          <Card className="w-full max-w-lg">
-            <CardContent className="p-8 text-center">
-              <h2 className="text-3xl font-bold mb-4">
-                {winner === 'You' ? '🎉 Victory!' : '💀 Defeat'}
-              </h2>
-              <p className="text-xl mb-6">
-                {winner === 'You' ? 'Congratulations, wizard!' : `${winner} has won the match`}
-              </p>
-              
-              <div className="bg-muted/50 rounded-lg p-4 mb-6 text-left">
-                <h3 className="font-semibold mb-2">Match Statistics</h3>
-                <div className="space-y-1 text-sm">
-                  <div className="flex justify-between">
-                    <span>Duration:</span>
-                    <span>{formatTime(matchDuration)}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span>Spells Cast:</span>
-                    <span>{castHistory.filter(c => c.playerId === 'player1').length}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span>Max Combo:</span>
-                    <span>{comboCount}x</span>
-                  </div>
-                </div>
-              </div>
-              
-              <div className="space-y-3">
-                <Button onClick={onBack} className="w-full">
-                  Return to Menu
                 </Button>
               </div>
             </CardContent>
