@@ -1,17 +1,16 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
-import { Progress } from '@/components/ui/progress';
-import { Badge } from '@/components/ui/badge';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { toast } from '@/hooks/use-toast';
 import { VoiceIndicator } from './VoiceIndicator';
 import { useVoiceRecognition } from '@/hooks/useVoiceRecognition';
 import { Caster } from './Caster';
 import { Projectile } from './Projectile';
-// NEW: Import QoL components
-import { StatusStrip } from '@/components/ui/status-strip';
+import { BattleHUD } from './BattleHUD';
+import { CastFeed, type FeedItem } from './CastFeed';
+import { EndMatchModal, type EndKind } from './EndMatchModal';
 import { CooldownRing } from '@/components/ui/cooldown-ring';
-import { MicBlockModal } from '@/components/ui/mic-block-modal';
+import { MicGauge } from '@/components/ui/mic-gauge';
+import { handleFinalTranscript, resetCastHistory, type AutoCasterDeps } from '@/gameplay/AutoCaster';
 import { findSpellMatches } from '@/utils/spellMatcher';
 import { SPELL_DATABASE } from '@/data/spells';
 import { SpellElement } from '@/types/game';
@@ -22,6 +21,7 @@ import { netClient } from '@/network/NetClient';
 import { voiceChat } from '@/network/VoiceChat';
 import type { RoomSnapshot, CastPayload } from '@/shared/net';
 import { makeServerTimer, canCast, markCast } from '@/shared/net';
+import { AudioMeter } from '@/audio/AudioMeter';
 import { 
   Volume2, VolumeX, Pause, Play, Settings, 
   Mic, MicOff, Shield, Heart, Zap, 
@@ -47,24 +47,15 @@ interface Player {
   isBot?: boolean;
 }
 
-interface CastHistory {
-  spellName: string;
-  accuracy: number;
-  power: number;
-  damage?: number;
-  healing?: number;
-  timestamp: number;
-  playerId: string;
-}
-
 export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId }: MatchProps) => {
-  // FIX: Server-synced game state
+  // Game state
   const [gameState, setGameState] = useState<'lobby' | 'countdown' | 'playing' | 'finished'>('countdown');
-  const [countdown, setCountdown] = useState<number | null>(null);
+  const [countdown, setCountdown] = useState<number | null>(3);
   const [roundTimer, setRoundTimer] = useState<number | null>(null);
   const [isPaused, setIsPaused] = useState(false);
   const [winner, setWinner] = useState<string | null>(null);
-  const [roomSnapshot, setRoomSnapshot] = useState<RoomSnapshot | null>(null);
+  const [endKind, setEndKind] = useState<EndKind>('victory');
+  const [showEndModal, setShowEndModal] = useState(false);
   
   // Players
   const [players, setPlayers] = useState<Player[]>([
@@ -73,20 +64,21 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
   ]);
   
   // Combat
-  const [castHistory, setCastHistory] = useState<CastHistory[]>([]);
+  const [castHistory, setCastHistory] = useState<FeedItem[]>([]);
   const [lastCastTime, setLastCastTime] = useState(0);
-  const [comboCount, setComboCount] = useState(0);
   const [globalCooldown, setGlobalCooldown] = useState(false);
-  const [spellCooldowns, setSpellCooldowns] = useState<Map<string, number>>(new Map());
+  const [totalDamageDealt, setTotalDamageDealt] = useState(0);
+  const [totalDamageTaken, setTotalDamageTaken] = useState(0);
   
   // Voice and audio
   const [isMuted, setIsMuted] = useState(false);
-  const [isVoiceChatMuted, setIsVoiceChatMuted] = useState(true);
-  const [showMicModal, setShowMicModal] = useState(false);
-  const [isSpectating, setIsSpectating] = useState(false);
-  const [micStatus, setMicStatus] = useState<'listening' | 'denied' | 'restarting' | 'disabled'>('disabled');
+  const [topGuesses, setTopGuesses] = useState<Array<{
+    spellId: string;
+    name: string;
+    score: number;
+  }>>([]);
   
-  // NEW: Casting visuals
+  // Casting visuals
   const [activeCasts, setActiveCasts] = useState<{
     player1?: { element: SpellElement; timestamp: number };
     player2?: { element: SpellElement; timestamp: number };
@@ -104,170 +96,46 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
   const vfxManagerRef = useRef<any>(null);
   const botOpponentRef = useRef<BotOpponent | null>(null);
   const matchStartTimeRef = useRef<number>(0);
+  const audioMeterRef = useRef<AudioMeter | null>(null);
   
-  // Voice recognition
-  const voiceRecognition = useVoiceRecognition((transcript, confidence, loudness) => {
-    if (gameState !== 'playing' || isPaused || !transcript.trim()) return;
-    
-    // Use lenient casting system
-    const result = matchOrFallback(transcript, { minScore: settings.minAccuracy || 0.25 });
-    const normalizedRms = 0.5; // TODO: Get from audio meter
-    const power = calculateSpellPower(result.score, loudness, normalizedRms, result.matched);
-    
-    if (power > 0) {
-      handleCast(result.spell.id, result.score, loudness, power, result.matched);
+  // Voice recognition with AutoCaster integration
+  const voiceRecognition = useVoiceRecognition({
+    onInterim: (transcript: string) => {
+      if (!transcript.trim()) {
+        setTopGuesses([]);
+        return;
+      }
+      
+      // Show live spell guesses
+      const matches = findSpellMatches(transcript, 0.2, 3);
+      setTopGuesses(matches.map(match => ({
+        spellId: match.spell.id,
+        name: match.spell.name,
+        score: match.accuracy
+      })));
+    },
+    onFinal: (transcript: string) => {
+      if (gameState !== 'playing' || isPaused || !transcript.trim()) return;
+      
+      // Use AutoCaster for consistent casting logic
+      const deps: AutoCasterDeps = {
+        getRms: () => audioMeterRef.current?.getRms() || 0,
+        getMinRms: () => audioMeterRef.current?.getCalibration().minRms || 0.02,
+        getCooldownMs: () => 1000,
+        hotwordEnabled: () => settings.hotwordEnabled || false,
+        hotword: () => settings.hotword || 'arcanum',
+        now: () => performance.now(),
+        onCast: (payload) => {
+          handlePlayerCast(payload);
+        },
+        onDebug: (msg) => console.log('AutoCaster:', msg)
+      };
+      
+      handleFinalTranscript(transcript, deps, settings.minAccuracy || 0.25, settings.alwaysCast !== false);
     }
   });
 
-  const { isListening, transcript, confidence, loudness, hasPermission, isSupported, micDenied, primeMic, rms } = voiceRecognition;
-
-  // FIX: Handle network events for online matches
-  useEffect(() => {
-    if (mode === 'bot') return; // Skip network events for bot matches
-    
-    const handleRoomUpdate = (snapshot: RoomSnapshot) => {
-      setRoomSnapshot(snapshot);
-      
-      // Update player states from server
-      setPlayers(prev => {
-        const updated = [...prev];
-        snapshot.players.forEach((serverPlayer, index) => {
-          if (updated[index]) {
-            updated[index] = {
-              ...updated[index],
-              hp: serverPlayer.hp,
-              mana: serverPlayer.mana,
-              name: serverPlayer.nick || updated[index].name
-            };
-          }
-        });
-        return updated;
-      });
-    };
-
-    const handleMatchStart = (data: { roomId: string; countdownEndsAt: number }) => {
-      setGameState('countdown');
-      const getTimer = makeServerTimer(data.countdownEndsAt, () => netClient.getServerOffset());
-      
-      const updateCountdown = () => {
-        const remaining = Math.ceil(getTimer() / 1000);
-        setCountdown(remaining);
-        
-        if (remaining <= 0) {
-          setCountdown(null);
-          // Wait for match:playing event
-        } else {
-          setTimeout(updateCountdown, 100);
-        }
-      };
-      updateCountdown();
-    };
-
-    const handleMatchPlaying = (data: { roomId: string; roundEndsAt: number }) => {
-      setGameState('playing');
-      setCountdown(null);
-      
-      // FIX: Prime and auto-start voice recognition for online matches
-      const primeMicForOnlineMatch = async () => {
-        try {
-          if (!hasPermission) {
-            await primeMic();
-          }
-          setMicStatus('listening');
-          if (voiceRecognition.autoStartListening) {
-            await voiceRecognition.autoStartListening();
-          }
-        } catch (error) {
-          console.error('Failed to prime mic for online match:', error);
-          setMicStatus('denied');
-          setShowMicModal(true);
-        }
-      };
-      
-      primeMicForOnlineMatch();
-      
-      const getTimer = makeServerTimer(data.roundEndsAt, () => netClient.getServerOffset());
-      
-      const updateTimer = () => {
-        const remaining = Math.ceil(getTimer() / 1000);
-        setRoundTimer(remaining);
-        
-        if (remaining > 0 && gameState === 'playing') {
-          setTimeout(updateTimer, 1000);
-        }
-      };
-      updateTimer();
-    };
-
-  const handleMatchFinished = (data: { roomId: string; winner?: string }) => {
-    setGameState('finished');
-    setWinner(data.winner || null);
-    setRoundTimer(null);
-    
-    // FIX: Stop voice recognition and voice chat properly
-    voiceRecognition.stopListening();
-    voiceChat.disconnect();
-    setMicStatus('disabled');
-    
-    // Stop bot if running
-    if (botOpponentRef.current) {
-      botOpponentRef.current.stop();
-    }
-    
-    // Clear any active projectiles and effects
-    setActiveProjectiles([]);
-    setActiveCasts({});
-    
-    soundManager.stopMusic();
-    if (data.winner === netClient.currentRoom) {
-      soundManager.playMusic('victory');
-    }
-  };
-
-    const handleNetworkCast = (cast: CastPayload & { from: string }) => {
-      // Only handle casts from other players
-      if (cast.from !== netClient.currentRoom) {
-        handleOpponentCast({
-          spellId: cast.spellId,
-          accuracy: cast.accuracy,
-          power: cast.power,
-          loudness: cast.loudness,
-          ts: cast.ts,
-          isBot: false
-        });
-      }
-    };
-
-    netClient.on('room_updated', handleRoomUpdate);
-    netClient.on('cast_received', handleNetworkCast);
-
-    return () => {
-      netClient.off('room_updated', handleRoomUpdate);
-      netClient.off('cast_received', handleNetworkCast);
-    };
-  }, [mode, gameState, voiceRecognition.autoStartListening, voiceRecognition.stopListening, hasPermission, primeMic]);
-
-  // FIX: Auto-start voice recognition for bot matches
-  useEffect(() => {
-    if (mode === 'bot' && gameState === 'playing') {
-      // Prime and start microphone for bot matches
-      const primeMicForMatch = async () => {
-        try {
-          await primeMic();
-          setMicStatus('listening');
-          if (voiceRecognition.autoStartListening) {
-            await voiceRecognition.autoStartListening();
-          }
-        } catch (error) {
-          console.error('Failed to prime mic for bot match:', error);
-          setMicStatus('denied');
-          setShowMicModal(true);
-        }
-      };
-      
-      primeMicForMatch();
-    }
-  }, [mode, gameState, primeMic, voiceRecognition.autoStartListening]);
+  const { isListening, transcript, confidence, loudness, hasPermission, isSupported, interim, final } = voiceRecognition;
 
   // Initialize systems
   useEffect(() => {
@@ -275,9 +143,16 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
       try {
         // Initialize audio
         await soundManager.init();
-        soundManager.setMasterVolume(settings.masterVolume || 0.8);
-        soundManager.setSFXVolume(settings.sfxVolume || 0.8);
-        soundManager.setMusicVolume(settings.musicVolume || 0.6);
+        soundManager.setVolumes({
+          ui: settings.masterVolume || 0.8,
+          sfx: settings.sfxVolume || 0.8,
+          music: settings.musicVolume || 0.6
+        });
+        
+        // Initialize audio meter
+        const meter = new AudioMeter();
+        await meter.start();
+        audioMeterRef.current = meter;
         
         // Initialize VFX
         if (vfxCanvasRef.current) {
@@ -290,15 +165,7 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
           botOpponentRef.current = createBotOpponent(botDifficulty);
         }
         
-        // Initialize voice chat for multiplayer
-        if (mode !== 'bot' && remoteAudioRef.current) {
-          const success = await voiceChat.init(remoteAudioRef.current);
-          if (success) {
-            await voiceChat.call();
-          }
-        }
-        
-        // Start match countdown
+        // Start countdown
         startCountdown();
         
       } catch (error) {
@@ -321,15 +188,17 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
       if (botOpponentRef.current) {
         botOpponentRef.current.stop();
       }
+      if (audioMeterRef.current) {
+        audioMeterRef.current.destroy();
+      }
       voiceChat.disconnect();
       soundManager.stopMusic();
+      resetCastHistory();
     };
   }, []);
 
-  // FIX: Start countdown only for bot matches (online matches get server events)
+  // Start countdown
   const startCountdown = useCallback(() => {
-    if (mode !== 'bot') return; // Online matches handled by server events
-    
     setGameState('countdown');
     setCountdown(3);
     
@@ -344,16 +213,23 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
         return prev !== null ? prev - 1 : null;
       });
     }, 1000);
-  }, [mode]);
+  }, []);
 
-  // Start match (bot only)
-  const startMatch = useCallback(() => {
-    if (mode !== 'bot') return;
-    
+  // Start match
+  const startMatch = useCallback(async () => {
     setGameState('playing');
+    setCountdown(null);
     matchStartTimeRef.current = Date.now();
     
-    // Voice recognition starts automatically
+    // Start voice recognition
+    try {
+      if (!hasPermission) {
+        await voiceRecognition.primeMic();
+      }
+      await voiceRecognition.start();
+    } catch (error) {
+      console.error('Failed to start voice recognition:', error);
+    }
     
     // Start bot opponent
     if (mode === 'bot' && botOpponentRef.current) {
@@ -363,7 +239,7 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
     }
     
     // Start battle music
-    soundManager.playMusic('match_intense');
+    soundManager.music.start('battle_theme');
     
     // Start match timer
     const timerInterval = setInterval(() => {
@@ -373,210 +249,100 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
     }, 1000);
 
     return () => clearInterval(timerInterval);
-  }, [hasPermission, isSupported, mode, gameState, isPaused]);
+  }, [hasPermission, mode, gameState, isPaused]);
 
-  // Handle spell casting
-  const handleCast = useCallback((spellId: string, accuracy: number, loudness: number, power: number) => {
-    const now = performance.now();
+  // Handle player cast
+  const handlePlayerCast = useCallback((payload: {
+    spellId: string;
+    accuracy: number;
+    loudness: number;
+    power: number;
+    assist?: boolean;
+  }) => {
+    const spell = SPELL_DATABASE.find(s => s.id === payload.spellId);
+    if (!spell) return;
     
-    // FIX: Only allow casts during playing state
-    if (gameState !== 'playing') {
-      toast({
-        title: "Cannot cast",
-        description: "Spells can only be cast during active gameplay",
-        variant: "default",
-      });
-      return;
-    }
-    
-    // FIX: Gate on mic status and spectating
-    if (isSpectating) {
-      toast({
-        title: "Spectating",
-        description: "You're in spectate mode - cannot cast spells",
-        variant: "default",
-      });
-      return;
-    }
-    
-    if (!isListening || micDenied) {
-      toast({
-        title: "Microphone required",
-        description: "Enable microphone access to cast spells",
-        variant: "default",
-      });
-      return;
-    }
-    
-    // FIX: Use shared cooldown validation
-    if (!canCast()) {
-      toast({
-        title: "Cooldown active",
-        description: "Wait before casting another spell",
-        variant: "default",
-      });
-      return;
-    }
-    
-    // Check spell-specific cooldown
-    const spellLastCast = spellCooldowns.get(spellId) || 0;
-    const spell = SPELL_DATABASE.find(s => s.id === spellId);
-    const spellCooldown = spell?.cooldown || 1500;
-    
-    if (now - spellLastCast < spellCooldown) {
-      return;
-    }
-    
-    // FIX: Mark cast for shared cooldown tracking
-    markCast();
-    
-    // Perform cast
-    const castData = {
-      spellName: spell?.name || 'Unknown Spell',
-      accuracy,
-      power,
-      damage: spell?.damage ? Math.floor(spell.damage * power) : 0,
-      healing: spell?.healing ? Math.floor(spell.healing * power) : 0,
-      timestamp: now,
-      playerId: 'player1'
-    };
-    
-    // Update cooldowns
-    setGlobalCooldown(true);
-    setTimeout(() => setGlobalCooldown(false), 1000);
-    
-    setSpellCooldowns(prev => new Map(prev.set(spellId, now)));
+    const damage = spell.damage ? Math.floor(spell.damage * payload.power) : 0;
+    const healing = spell.healing ? Math.floor(spell.healing * payload.power) : 0;
     
     // Add to cast history
-    setCastHistory(prev => [...prev, castData]);
+    const feedItem: FeedItem = {
+      id: `cast-${Date.now()}`,
+      caster: 'you',
+      spell: spell.name,
+      acc: payload.accuracy,
+      power: payload.power,
+      deltaHp: damage > 0 ? -damage : healing > 0 ? healing : undefined,
+      ts: Date.now(),
+      assist: payload.assist
+    };
+    
+    setCastHistory(prev => [...prev, feedItem]);
     
     // Apply effects
-    if (castData.damage > 0) {
-      dealDamage('player2', castData.damage);
+    if (damage > 0) {
+      dealDamage('player2', damage);
+      setTotalDamageDealt(prev => prev + damage);
     }
-    if (castData.healing > 0) {
-      healPlayer('player1', castData.healing);
+    if (healing > 0) {
+      healPlayer('player1', healing);
     }
     
-    // NEW: Visual and audio feedback with caster visuals
-    if (spell) {
-      soundManager.playCast(spell.element, loudness);
-      
-      // Show casting animation
-      setActiveCasts(prev => ({
-        ...prev,
-        player1: { element: spell.element, timestamp: now }
-      }));
-      
-      // Clear casting animation after 600ms
+    // Visual and audio feedback
+    setActiveCasts(prev => ({
+      ...prev,
+      player1: { element: spell.element, timestamp: Date.now() }
+    }));
+    
+    // Clear casting animation after 600ms
+    setTimeout(() => {
+      setActiveCasts(prev => ({ ...prev, player1: undefined }));
+    }, 600);
+    
+    // Create projectile for damage spells
+    if (damage > 0) {
       setTimeout(() => {
-        setActiveCasts(prev => ({ ...prev, player1: undefined }));
-      }, 600);
-      
-      // Create projectile for damage spells
-      if (castData.damage > 0) {
-        setTimeout(() => {
-          const projectileId = projectileIdRef.current++;
-          setActiveProjectiles(prev => [...prev, {
-            id: projectileId,
-            element: spell.element,
-            from: { x: 200, y: 400 },
-            to: { x: 600, y: 200 },
-            power,
-            onComplete: () => {
-              setActiveProjectiles(prev => prev.filter(p => p.id !== projectileId));
-              // Screen shake and impact sound
-              soundManager.playImpact(spell.element);
-            }
-          }]);
-        }, 400);
-      }
+        const projectileId = projectileIdRef.current++;
+        setActiveProjectiles(prev => [...prev, {
+          id: projectileId,
+          element: spell.element,
+          from: { x: 200, y: 400 },
+          to: { x: 600, y: 200 },
+          power: payload.power,
+          onComplete: () => {
+            setActiveProjectiles(prev => prev.filter(p => p.id !== projectileId));
+            soundManager.play('impact', spell.element);
+          }
+        }]);
+      }, 400);
     }
-    
-    // Update combo
-    const timeSinceLastCast = now - lastCastTime;
-    if (timeSinceLastCast < 2500) {
-      setComboCount(prev => prev + 1);
-    } else {
-      setComboCount(1);
-    }
-    setLastCastTime(now);
     
     // Show damage numbers
-    if (castData.damage > 0) {
+    if (damage > 0) {
       setShowingDamage({
-        amount: castData.damage,
+        amount: damage,
         type: 'damage',
         position: { x: 600, y: 150 }
       });
       setTimeout(() => setShowingDamage(null), 2000);
     }
     
-    // FIX: Send to network with validation (multiplayer)
-    if (mode !== 'bot' && roomId) {
-      const success = netClient.sendCast({
-        roomId,
-        spellId,
-        accuracy,
-        loudness,
-        power,
-        ts: now
-      });
-      
-      if (!success) {
-        console.warn('Failed to send cast - cooldown or connection issue');
-      }
-    }
+    // Set cooldown
+    setGlobalCooldown(true);
+    setTimeout(() => setGlobalCooldown(false), 1000);
     
-  }, [globalCooldown, spellCooldowns, lastCastTime, mode, roomId, gameState, isSpectating, isListening, micDenied]);
-
-  // FIX: Mic modal handlers
-  const handleMicRetry = useCallback(async () => {
-    try {
-      await primeMic();
-      setMicStatus('listening');
-      setShowMicModal(false);
-      if (voiceRecognition.autoStartListening) {
-        await voiceRecognition.autoStartListening();
-      }
-    } catch (error) {
-      console.error('Mic retry failed:', error);
-      toast({
-        title: "Microphone Failed",
-        description: "Unable to access microphone. Try refreshing the page.",
-        variant: "destructive",
+    // Send to network for multiplayer
+    if (mode !== 'bot' && roomId) {
+      netClient.sendCast({
+        roomId,
+        spellId: payload.spellId,
+        accuracy: payload.accuracy,
+        loudness: payload.loudness,
+        power: payload.power,
+        ts: Date.now()
       });
     }
-  }, [primeMic, voiceRecognition.autoStartListening]);
-
-  const handleSpectateMode = useCallback(() => {
-    setIsSpectating(true);
-    setShowMicModal(false);
-    setMicStatus('disabled');
-    toast({
-      title: "Spectate Mode",
-      description: "You're now spectating - cannot cast spells",
-      variant: "default",
-    });
-  }, []);
-
-  const handleMicCancel = useCallback(() => {
-    setShowMicModal(false);
-    onBack();
-  }, [onBack]);
-
-  // FIX: Track mic status changes
-  useEffect(() => {
-    if (isListening) {
-      setMicStatus('listening');
-    } else if (micDenied) {
-      setMicStatus('denied');
-    } else if (hasPermission && !isListening) {
-      setMicStatus('restarting');
-    } else {
-      setMicStatus('disabled');
-    }
-  }, [isListening, micDenied, hasPermission]);
+  }, [mode, roomId]);
 
   // Handle opponent cast
   const handleOpponentCast = useCallback((castData: any) => {
@@ -587,34 +353,34 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
     const healing = spell.healing ? Math.floor(spell.healing * castData.power) : 0;
     
     // Add to cast history
-    setCastHistory(prev => [...prev, {
-      spellName: spell.name,
-      accuracy: castData.accuracy,
+    const feedItem: FeedItem = {
+      id: `cast-${Date.now()}`,
+      caster: 'foe',
+      spell: spell.name,
+      acc: castData.accuracy,
       power: castData.power,
-      damage,
-      healing,
-      timestamp: castData.ts,
-      playerId: castData.isBot ? 'player2' : 'opponent'
-    }]);
+      deltaHp: damage > 0 ? -damage : healing > 0 ? healing : undefined,
+      ts: Date.now(),
+      assist: castData.assist
+    };
+    
+    setCastHistory(prev => [...prev, feedItem]);
     
     // Apply effects
     if (damage > 0) {
       dealDamage('player1', damage);
+      setTotalDamageTaken(prev => prev + damage);
     }
     if (healing > 0) {
       healPlayer('player2', healing);
     }
     
-    // NEW: Audio and visual feedback for opponent
-    soundManager.playCast(spell.element, castData.loudness || 0.8);
-    
-    // Show opponent casting animation
+    // Visual feedback
     setActiveCasts(prev => ({
       ...prev,
-      player2: { element: spell.element, timestamp: castData.ts }
+      player2: { element: spell.element, timestamp: Date.now() }
     }));
     
-    // Clear casting animation after 600ms
     setTimeout(() => {
       setActiveCasts(prev => ({ ...prev, player2: undefined }));
     }, 600);
@@ -630,24 +396,12 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
           power: castData.power,
           onComplete: () => {
             setActiveProjectiles(prev => prev.filter(p => p.id !== projectileId));
-            soundManager.playImpact(spell.element);
+            soundManager.play('impact', spell.element);
           }
         }]);
       }, 400);
     }
-    
-    // Show damage numbers
-    if (damage > 0) {
-      setShowingDamage({
-        amount: damage,
-        type: 'damage',
-        position: { x: 200, y: 350 }
-      });
-      setTimeout(() => setShowingDamage(null), 2000);
-    }
   }, []);
-
-  // Voice recognition handled in callback above
 
   // Damage/healing functions
   const dealDamage = useCallback((playerId: string, amount: number) => {
@@ -656,14 +410,15 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
         const newHp = Math.max(0, player.hp - amount);
         if (newHp === 0 && gameState === 'playing') {
           // Player defeated
-          const winnerId = playerId === 'player1' ? 'player2' : 'player1';
-          const winnerName = players.find(p => p.id === winnerId)?.name || 'Unknown';
-          setWinner(winnerName);
+          const isPlayerDefeated = playerId === 'player1';
+          setWinner(isPlayerDefeated ? players[1].name : players[0].name);
+          setEndKind(isPlayerDefeated ? 'defeat' : 'victory');
           setGameState('finished');
+          setShowEndModal(true);
           soundManager.stopMusic();
           
-          if (winnerId === 'player1') {
-            soundManager.playMusic('victory');
+          if (!isPlayerDefeated) {
+            soundManager.music.start('victory');
           }
         }
         return { ...player, hp: newHp };
@@ -688,13 +443,13 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
     setIsPaused(prev => {
       const newPaused = !prev;
       if (newPaused) {
-        voiceRecognition.stopListening();
+        voiceRecognition.stop();
         if (botOpponentRef.current) {
           botOpponentRef.current.stop();
         }
       } else {
         if (hasPermission) {
-          voiceRecognition.startListening();
+          voiceRecognition.start();
         }
         if (botOpponentRef.current) {
           botOpponentRef.current.start(handleOpponentCast);
@@ -702,7 +457,51 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
       }
       return newPaused;
     });
-  }, [gameState, hasPermission, voiceRecognition.startListening, voiceRecognition.stopListening, handleOpponentCast]);
+  }, [gameState, hasPermission, voiceRecognition, handleOpponentCast]);
+
+  // End match handlers
+  const handlePlayAgain = useCallback(() => {
+    // Reset match state
+    setGameState('countdown');
+    setPlayers([
+      { id: 'player1', name: 'You', hp: 100, maxHp: 100, mana: 100, maxMana: 100 },
+      { id: 'player2', name: mode === 'bot' ? 'Bot' : 'Opponent', hp: 100, maxHp: 100, mana: 100, maxMana: 100, isBot: mode === 'bot' }
+    ]);
+    setCastHistory([]);
+    setWinner(null);
+    setShowEndModal(false);
+    setTotalDamageDealt(0);
+    setTotalDamageTaken(0);
+    resetCastHistory();
+    startCountdown();
+  }, [mode, startCountdown]);
+
+  const handleNextBot = useCallback(() => {
+    const difficulties: Array<'easy' | 'medium' | 'hard'> = ['easy', 'medium', 'hard'];
+    const currentIndex = difficulties.indexOf(botDifficulty);
+    const nextDifficulty = difficulties[Math.min(currentIndex + 1, difficulties.length - 1)];
+    
+    // Reset with harder bot
+    setGameState('countdown');
+    setPlayers([
+      { id: 'player1', name: 'You', hp: 100, maxHp: 100, mana: 100, maxMana: 100 },
+      { id: 'player2', name: `${nextDifficulty.charAt(0).toUpperCase() + nextDifficulty.slice(1)} Bot`, hp: 100, maxHp: 100, mana: 100, maxMana: 100, isBot: true }
+    ]);
+    setCastHistory([]);
+    setWinner(null);
+    setShowEndModal(false);
+    setTotalDamageDealt(0);
+    setTotalDamageTaken(0);
+    resetCastHistory();
+    
+    // Create new bot
+    if (botOpponentRef.current) {
+      botOpponentRef.current.stop();
+    }
+    botOpponentRef.current = createBotOpponent(nextDifficulty);
+    
+    startCountdown();
+  }, [botDifficulty, startCountdown]);
 
   // Keyboard controls
   useEffect(() => {
@@ -730,62 +529,6 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
   const player1 = players[0];
   const player2 = players[1];
 
-  // FIX: Handle finished state with results screen
-  if (gameState === 'finished') {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-primary/20 via-background to-secondary/20 flex items-center justify-center p-4">
-        <Card className="w-full max-w-2xl text-center">
-          <CardHeader>
-            <CardTitle className="text-4xl mb-4">
-              {winner === 'You' ? '🏆 Victory!' : winner ? '💀 Defeat' : '⚔️ Draw'}
-            </CardTitle>
-            <CardDescription className="text-lg">
-              {winner === 'You' && 'Your voice magic proved superior!'}
-              {winner && winner !== 'You' && `${winner} emerged victorious!`}
-              {!winner && 'An honorable battle with no clear victor.'}
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-6">
-            {/* Match Stats */}
-            <div className="grid grid-cols-2 gap-4 text-sm">
-              <div className="bg-muted/50 p-3 rounded-lg">
-                <div className="font-semibold">Spells Cast</div>
-                <div className="text-2xl">{castHistory.filter(c => c.playerId === 'player1').length}</div>
-              </div>
-              <div className="bg-muted/50 p-3 rounded-lg">
-                <div className="font-semibold">Accuracy</div>
-                <div className="text-2xl">
-                  {Math.round((castHistory.filter(c => c.playerId === 'player1').reduce((acc, c) => acc + c.accuracy, 0) / Math.max(1, castHistory.filter(c => c.playerId === 'player1').length)) * 100)}%
-                </div>
-              </div>
-            </div>
-            
-            <div className="flex gap-4 justify-center">
-              <Button onClick={() => {
-                // Reset match state for rematch
-                setGameState('countdown');
-                setPlayers([
-                  { id: 'player1', name: 'You', hp: 100, maxHp: 100, mana: 100, maxMana: 100 },
-                  { id: 'player2', name: mode === 'bot' ? 'Bot' : 'Opponent', hp: 100, maxHp: 100, mana: 100, maxMana: 100, isBot: mode === 'bot' }
-                ]);
-                setCastHistory([]);
-                setWinner(null);
-                if (mode === 'bot') {
-                  startCountdown();
-                }
-              }}>
-                Rematch
-              </Button>
-              <Button variant="outline" onClick={onBack}>
-                Back to Menu
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
-
   if (gameState === 'countdown') {
     return (
       <div className="min-h-screen bg-gradient-to-br from-primary/20 via-background to-secondary/20 flex items-center justify-center">
@@ -803,7 +546,7 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-primary/20 via-background to-secondary/20 relative overflow-hidden">
-      {/* NEW: Caster Visuals */}
+      {/* Caster Visuals */}
       <div className="absolute inset-0 z-10 pointer-events-none">
         {/* Player 1 (Left) */}
         <div className="absolute bottom-16 left-16">
@@ -850,196 +593,97 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
       {/* Remote Audio for Voice Chat */}
       <audio ref={remoteAudioRef} autoPlay className="hidden" />
       
-      {/* Top HUD */}
-      <div className="relative z-20 p-4">
-        <div className="flex justify-between items-center mb-4">
-          <Button variant="ghost" onClick={onBack} className="text-muted-foreground">
-            <ArrowLeft className="w-4 h-4 mr-2" />
-            Back
-          </Button>
-          
-          <div className="flex items-center space-x-4">
-            <Badge variant="outline" className="text-sm">
-              <Timer className="w-4 h-4 mr-1" />
-              {formatTime(matchDuration)}
-            </Badge>
-            
-            {comboCount > 1 && (
-              <Badge className="bg-gradient-to-r from-orange-500 to-red-500 text-white animate-pulse">
-                {comboCount}x COMBO!
-              </Badge>
-            )}
-          </div>
-          
-          <div className="flex items-center space-x-2">
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setIsMuted(!isMuted)}
-              className="text-muted-foreground"
-            >
-              {isMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
-            </Button>
-            
-            {mode !== 'bot' && (
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setIsVoiceChatMuted(!isVoiceChatMuted)}
-                className="text-muted-foreground"
+      {/* Battle HUD */}
+      <BattleHUD
+        you={{
+          name: player1.name,
+          hp: player1.hp,
+          mp: player1.mana,
+          maxHp: player1.maxHp,
+          maxMp: player1.maxMana,
+          crown: true
+        }}
+        foe={{
+          name: player2.name,
+          hp: player2.hp,
+          mp: player2.mana,
+          maxHp: player2.maxHp,
+          maxMp: player2.maxMana,
+          isBot: player2.isBot
+        }}
+        time={formatTime(matchDuration)}
+        onBack={onBack}
+        isMuted={isMuted}
+        onToggleMute={() => {
+          setIsMuted(!isMuted);
+          soundManager.setMuted(!isMuted);
+        }}
+      />
+
+      {/* Bottom HUD - Mic Interface */}
+      <div className="fixed bottom-4 left-4 right-4 z-20">
+        <div className="max-w-6xl mx-auto">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            {/* Mic Gauge */}
+            <div className="flex justify-center lg:justify-start">
+              <CooldownRing
+                isActive={globalCooldown}
+                cooldownMs={1000}
+                className="inline-block"
               >
-                {isVoiceChatMuted ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
-              </Button>
-            )}
+                <MicGauge
+                  rms={audioMeterRef.current?.getRms() || 0}
+                  dbfs={audioMeterRef.current?.getDbfs() || -60}
+                  normalizedRms={audioMeterRef.current?.normalizedRms(audioMeterRef.current?.getRms() || 0) || 0}
+                  calibration={audioMeterRef.current?.getCalibration()}
+                  muted={!isListening}
+                />
+              </CooldownRing>
+            </div>
             
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={togglePause}
-              className="text-muted-foreground"
-            >
-              {isPaused ? <Play className="w-4 h-4" /> : <Pause className="w-4 h-4" />}
-            </Button>
+            {/* Voice Status */}
+            <div className="bg-card/80 backdrop-blur border rounded-lg p-4">
+              <div className="space-y-2">
+                <div className="text-sm font-medium">
+                  {!hasPermission ? (
+                    <span className="text-destructive">Microphone access required</span>
+                  ) : isListening ? (
+                    <span className="text-nature">Listening...</span>
+                  ) : (
+                    <span className="text-muted-foreground">Microphone ready</span>
+                  )}
+                </div>
+                
+                {interim && (
+                  <div className="text-sm text-muted-foreground italic">
+                    {interim}
+                  </div>
+                )}
+                
+                {final && (
+                  <div className="text-sm text-nature font-medium">
+                    ✓ {final}
+                  </div>
+                )}
+                
+                {topGuesses.length > 0 && (
+                  <div className="flex gap-2 flex-wrap">
+                    {topGuesses.slice(0, 3).map((guess, idx) => (
+                      <span key={guess.spellId} className="text-xs bg-primary/20 px-2 py-1 rounded">
+                        {idx + 1}. {guess.name} ({Math.round(guess.score * 100)}%)
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+            
+            {/* Cast Feed */}
+            <div className="flex justify-center lg:justify-end">
+              <CastFeed items={castHistory} className="w-full max-w-80" />
+            </div>
           </div>
         </div>
-
-        {/* Player Status */}
-        <div className="grid grid-cols-2 gap-8 max-w-4xl mx-auto">
-          {/* Player 1 (You) */}
-          <Card className="bg-background/80 backdrop-blur">
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between mb-2">
-                <h3 className="font-semibold text-lg">{player1.name}</h3>
-                <Crown className="w-5 h-5 text-yellow-500" />
-              </div>
-              
-              <div className="space-y-2">
-                <div>
-                  <div className="flex justify-between text-sm mb-1">
-                    <span className="flex items-center">
-                      <Heart className="w-4 h-4 mr-1 text-red-500" />
-                      Health
-                    </span>
-                    <span>{player1.hp}/{player1.maxHp}</span>
-                  </div>
-                  <Progress value={(player1.hp / player1.maxHp) * 100} className="h-3" />
-                </div>
-                
-                <div>
-                  <div className="flex justify-between text-sm mb-1">
-                    <span className="flex items-center">
-                      <Zap className="w-4 h-4 mr-1 text-blue-500" />
-                      Mana
-                    </span>
-                    <span>{player1.mana}/{player1.maxMana}</span>
-                  </div>
-                  <Progress value={(player1.mana / player1.maxMana) * 100} className="h-3" />
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Player 2 (Opponent/Bot) */}
-          <Card className="bg-background/80 backdrop-blur">
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between mb-2">
-                <h3 className="font-semibold text-lg">{player2.name}</h3>
-                {player2.isBot && <Badge variant="secondary">Bot</Badge>}
-              </div>
-              
-              <div className="space-y-2">
-                <div>
-                  <div className="flex justify-between text-sm mb-1">
-                    <span className="flex items-center">
-                      <Heart className="w-4 h-4 mr-1 text-red-500" />
-                      Health
-                    </span>
-                    <span>{player2.hp}/{player2.maxHp}</span>
-                  </div>
-                  <Progress value={(player2.hp / player2.maxHp) * 100} className="h-3" />
-                </div>
-                
-                <div>
-                  <div className="flex justify-between text-sm mb-1">
-                    <span className="flex items-center">
-                      <Zap className="w-4 h-4 mr-1 text-blue-500" />
-                      Mana
-                    </span>
-                    <span>{player2.mana}/{player2.maxMana}</span>
-                  </div>
-                  <Progress value={(player2.mana / player2.maxMana) * 100} className="h-3" />
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-      </div>
-
-      {/* NEW: Status Strip */}
-      <div className="fixed bottom-4 left-4 z-20">
-        <StatusStrip
-          micStatus={micStatus}
-          connectionStatus={mode === 'bot' ? 'connected' : (netClient.isConnected() ? 'connected' : 'disconnected')}
-          rmsLevel={rms()}
-        />
-      </div>
-
-      {/* Voice Indicator (moved right) */}
-      <div className="fixed bottom-4 left-80 z-20">
-        <CooldownRing
-          isActive={globalCooldown}
-          cooldownMs={1000}
-          className="inline-block"
-        >
-          <VoiceIndicator
-            voiceState={{
-              isListening,
-              isSupported,
-              hasPermission,
-              transcript,
-              confidence,
-              loudness
-            }}
-            onToggle={voiceRecognition.toggle}
-          />
-        </CooldownRing>
-      </div>
-
-      {/* Cast History */}
-      <div className="fixed bottom-4 right-4 z-20 w-80">
-        <Card className="bg-background/90 backdrop-blur max-h-60 overflow-y-auto">
-          <CardContent className="p-3">
-            <h4 className="font-semibold mb-2 text-sm">Recent Casts</h4>
-            <div className="space-y-1 text-xs">
-              {castHistory.slice(-5).reverse().map((cast, index) => (
-                <div
-                  key={index}
-                  className={cn(
-                    "flex justify-between items-center p-2 rounded",
-                    cast.playerId === 'player1' ? "bg-green-100 dark:bg-green-900/20" : "bg-red-100 dark:bg-red-900/20"
-                  )}
-                >
-                  <span className="font-medium">{cast.spellName}</span>
-                  <div className="flex items-center space-x-1">
-                    <Badge variant="secondary" className="text-xs">
-                      {Math.round(cast.accuracy * 100)}%
-                    </Badge>
-                    {cast.damage > 0 && (
-                      <Badge variant="destructive" className="text-xs">
-                        -{cast.damage}
-                      </Badge>
-                    )}
-                    {cast.healing > 0 && (
-                      <Badge className="bg-green-500 text-xs">
-                        +{cast.healing}
-                      </Badge>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
       </div>
 
       {/* Damage Numbers */}
@@ -1063,28 +707,30 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
       {/* Pause Overlay */}
       {isPaused && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-40">
-          <Card className="w-full max-w-md">
-            <CardContent className="p-6 text-center">
-              <h2 className="text-2xl font-bold mb-4">Game Paused</h2>
-              <div className="space-y-4">
-                <Button onClick={togglePause} className="w-full">
-                  Resume Match
-                </Button>
-                <Button onClick={onBack} variant="outline" className="w-full">
-                  Exit Match
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
+          <div className="bg-card p-6 rounded-lg border shadow-lg text-center">
+            <h2 className="text-2xl font-bold mb-4">Game Paused</h2>
+            <div className="space-y-4">
+              <Button onClick={togglePause} className="w-full">
+                Resume Match
+              </Button>
+              <Button onClick={onBack} variant="outline" className="w-full">
+                Exit Match
+              </Button>
+            </div>
+          </div>
         </div>
       )}
 
-      {/* NEW: Mic Block Modal */}
-      <MicBlockModal
-        isOpen={showMicModal}
-        onRetry={handleMicRetry}
-        onSpectate={handleSpectateMode}
-        onCancel={handleMicCancel}
+      {/* End Match Modal */}
+      <EndMatchModal
+        isOpen={showEndModal}
+        kind={endKind}
+        youDmg={totalDamageDealt}
+        foeDmg={totalDamageTaken}
+        casts={castHistory}
+        onPlayAgain={handlePlayAgain}
+        onBackToMenu={onBack}
+        onNextBot={mode === 'bot' ? handleNextBot : undefined}
       />
     </div>
   );

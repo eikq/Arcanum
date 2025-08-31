@@ -180,8 +180,10 @@ export function calculateSpellPower(
     power *= 0.6;
   }
   
-  // Clamp between 0 and 1
-  return Math.max(0, Math.min(1, power));
+  // Ensure minimum power for always-cast
+  power = Math.max(0.05, power);
+  
+  return power;
 }
 
 // Get element color class for UI
