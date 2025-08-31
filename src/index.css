@@ -2,41 +2,89 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Definition of the design system. All colors, gradients, fonts, etc should be defined here. 
-All colors MUST be HSL.
-*/
+/* Steampunk-Arcane Spellcasting Game Design System */
 
 @layer base {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 222.2 84% 4.9%;
+    /* Base colors - Steampunk Arcane theme */
+    --background: 220 15% 8%;
+    --foreground: 180 20% 85%;
 
-    --card: 0 0% 100%;
-    --card-foreground: 222.2 84% 4.9%;
+    /* Card system */
+    --card: 220 15% 12%;
+    --card-foreground: 180 20% 85%;
 
-    --popover: 0 0% 100%;
-    --popover-foreground: 222.2 84% 4.9%;
+    /* Popover system */
+    --popover: 220 15% 10%;
+    --popover-foreground: 180 20% 85%;
 
-    --primary: 222.2 47.4% 11.2%;
-    --primary-foreground: 210 40% 98%;
+    /* Primary - Arcane Teal/Cyan */
+    --primary: 180 100% 50%;
+    --primary-foreground: 220 15% 8%;
 
-    --secondary: 210 40% 96.1%;
-    --secondary-foreground: 222.2 47.4% 11.2%;
+    /* Secondary - Deep steampunk bronze */
+    --secondary: 25 60% 25%;
+    --secondary-foreground: 180 20% 85%;
 
-    --muted: 210 40% 96.1%;
-    --muted-foreground: 215.4 16.3% 46.9%;
+    /* Muted system */
+    --muted: 220 15% 15%;
+    --muted-foreground: 180 10% 60%;
 
-    --accent: 210 40% 96.1%;
-    --accent-foreground: 222.2 47.4% 11.2%;
+    /* Accent - Bright arcane */
+    --accent: 180 100% 60%;
+    --accent-foreground: 220 15% 8%;
 
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 210 40% 98%;
+    /* Destructive - Fire red */
+    --destructive: 0 80% 55%;
+    --destructive-foreground: 180 20% 85%;
 
-    --border: 214.3 31.8% 91.4%;
-    --input: 214.3 31.8% 91.4%;
-    --ring: 222.2 84% 4.9%;
+    /* Border and input */
+    --border: 220 15% 20%;
+    --input: 220 15% 15%;
+    --ring: 180 100% 50%;
 
-    --radius: 0.5rem;
+    /* Elemental colors */
+    --fire: 15 100% 60%;
+    --ice: 200 100% 70%;
+    --lightning: 270 100% 80%;
+    --nature: 120 60% 50%;
+    --shadow: 270 50% 25%;
+    --light: 45 100% 70%;
+    --arcane: 180 100% 50%;
+    --water: 210 100% 60%;
+    --wind: 160 40% 70%;
+    --earth: 30 50% 40%;
+
+    /* Game specific */
+    --health: 0 80% 55%;
+    --mana: 240 100% 60%;
+    --experience: 280 100% 50%;
+
+    /* VFX colors */
+    --glow-primary: 180 100% 50%;
+    --glow-fire: 15 100% 60%;
+    --glow-ice: 200 100% 70%;
+    --glow-lightning: 270 100% 80%;
+
+    /* Gradients */
+    --gradient-arcane: linear-gradient(135deg, hsl(180 100% 50%), hsl(180 100% 70%));
+    --gradient-fire: linear-gradient(135deg, hsl(15 100% 60%), hsl(25 100% 50%));
+    --gradient-ice: linear-gradient(135deg, hsl(200 100% 70%), hsl(220 100% 80%));
+    --gradient-spell: linear-gradient(135deg, hsl(180 100% 50%), hsl(270 100% 60%));
+    --gradient-background: linear-gradient(145deg, hsl(220 15% 8%), hsl(220 15% 12%));
+
+    /* Shadows and glows */
+    --shadow-arcane: 0 0 20px hsl(180 100% 50% / 0.5);
+    --shadow-fire: 0 0 20px hsl(15 100% 60% / 0.5);
+    --shadow-ice: 0 0 20px hsl(200 100% 70% / 0.5);
+    --shadow-elevation: 0 8px 32px hsl(220 15% 4% / 0.5);
+
+    /* Animation timings */
+    --transition-fast: 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+    --transition-normal: 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    --transition-slow: 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+
+    --radius: 0.75rem;
 
     --sidebar-background: 0 0% 98%;
 
@@ -100,6 +148,162 @@ All colors MUST be HSL.
   }
 
   body {
-    @apply bg-background text-foreground;
+    @apply bg-background text-foreground font-mono;
+    background: var(--gradient-background);
+    overflow-x: hidden;
   }
+
+  /* Game-specific animations */
+  @keyframes spell-cast {
+    0% { transform: scale(0.8) rotate(0deg); opacity: 0; }
+    50% { transform: scale(1.1) rotate(180deg); opacity: 1; }
+    100% { transform: scale(1) rotate(360deg); opacity: 1; }
+  }
+
+  @keyframes arcane-glow {
+    0%, 100% { box-shadow: var(--shadow-arcane); }
+    50% { box-shadow: 0 0 40px hsl(180 100% 50% / 0.8); }
+  }
+
+  @keyframes spell-particle {
+    0% { transform: translateY(0) scale(1); opacity: 1; }
+    100% { transform: translateY(-100px) scale(0); opacity: 0; }
+  }
+
+  @keyframes health-pulse {
+    0%, 100% { box-shadow: 0 0 10px hsl(0 80% 55% / 0.3); }
+    50% { box-shadow: 0 0 20px hsl(0 80% 55% / 0.6); }
+  }
+
+  @keyframes mana-flow {
+    0% { background-position: 0% 50%; }
+    50% { background-position: 100% 50%; }
+    100% { background-position: 0% 50%; }
+  }
+
+  @keyframes voice-pulse {
+    0%, 100% { transform: scale(1); opacity: 0.7; }
+    50% { transform: scale(1.2); opacity: 1; }
+  }
+}
+
+@layer components {
+  /* Button variants */
+  .btn-spell {
+    @apply relative px-6 py-3 font-bold tracking-wide uppercase;
+    @apply bg-gradient-to-br from-primary to-accent;
+    @apply text-primary-foreground shadow-lg;
+    @apply border border-primary/30 rounded-lg;
+    @apply transition-all duration-300;
+    @apply hover:shadow-[var(--shadow-arcane)] hover:scale-105;
+    @apply active:scale-95;
+  }
+
+  .btn-element {
+    @apply relative px-4 py-2 font-semibold;
+    @apply border-2 rounded-lg transition-all duration-200;
+    @apply hover:scale-105 active:scale-95;
+  }
+
+  .btn-fire {
+    @apply border-[hsl(var(--fire))] text-[hsl(var(--fire))];
+    @apply hover:bg-[hsl(var(--fire))] hover:text-background;
+    @apply hover:shadow-[var(--shadow-fire)];
+  }
+
+  .btn-ice {
+    @apply border-[hsl(var(--ice))] text-[hsl(var(--ice))];
+    @apply hover:bg-[hsl(var(--ice))] hover:text-background;
+    @apply hover:shadow-[var(--shadow-ice)];
+  }
+
+  .btn-lightning {
+    @apply border-[hsl(var(--lightning))] text-[hsl(var(--lightning))];
+    @apply hover:bg-[hsl(var(--lightning))] hover:text-background;
+  }
+
+  .btn-nature {
+    @apply border-[hsl(var(--nature))] text-[hsl(var(--nature))];
+    @apply hover:bg-[hsl(var(--nature))] hover:text-background;
+  }
+
+  .btn-shadow {
+    @apply border-[hsl(var(--shadow))] text-[hsl(var(--shadow))];
+    @apply hover:bg-[hsl(var(--shadow))] hover:text-foreground;
+  }
+
+  .btn-light {
+    @apply border-[hsl(var(--light))] text-[hsl(var(--light))];
+    @apply hover:bg-[hsl(var(--light))] hover:text-background;
+  }
+
+  .btn-arcane {
+    @apply border-[hsl(var(--arcane))] text-[hsl(var(--arcane))];
+    @apply hover:bg-[hsl(var(--arcane))] hover:text-background;
+    @apply hover:shadow-[var(--shadow-arcane)];
+  }
+
+  /* Card styles */
+  .spell-card {
+    @apply bg-card border border-border rounded-lg p-4;
+    @apply shadow-[var(--shadow-elevation)] transition-all duration-300;
+    @apply hover:shadow-[var(--shadow-arcane)] hover:scale-105;
+    @apply hover:border-primary/50;
+  }
+
+  .game-hud {
+    @apply bg-card/80 backdrop-blur-sm border border-border/50;
+    @apply rounded-lg p-4 shadow-lg;
+  }
+
+  /* Health and Mana bars */
+  .health-bar {
+    @apply bg-[hsl(var(--health))] rounded-full;
+    animation: health-pulse 2s infinite;
+  }
+
+  .mana-bar {
+    @apply bg-gradient-to-r from-[hsl(var(--mana))] to-[hsl(var(--experience))];
+    @apply rounded-full;
+    background-size: 200% 200%;
+    animation: mana-flow 3s ease-in-out infinite;
+  }
+
+  /* Voice visualization */
+  .voice-indicator {
+    @apply bg-primary rounded-full;
+    animation: voice-pulse 1.5s ease-in-out infinite;
+  }
+
+  /* Spell effects */
+  .spell-sigil {
+    animation: spell-cast 0.8s ease-out;
+  }
+
+  .arcane-glow {
+    animation: arcane-glow 2s ease-in-out infinite;
+  }
+
+  /* Utility classes */
+  .text-fire { color: hsl(var(--fire)); }
+  .text-ice { color: hsl(var(--ice)); }
+  .text-lightning { color: hsl(var(--lightning)); }
+  .text-nature { color: hsl(var(--nature)); }
+  .text-shadow { color: hsl(var(--shadow)); }
+  .text-light { color: hsl(var(--light)); }
+  .text-arcane { color: hsl(var(--arcane)); }
+  .text-water { color: hsl(var(--water)); }
+  .text-wind { color: hsl(var(--wind)); }
+  .text-earth { color: hsl(var(--earth)); }
+
+  .bg-fire { background-color: hsl(var(--fire)); }
+  .bg-ice { background-color: hsl(var(--ice)); }
+  .bg-lightning { background-color: hsl(var(--lightning)); }
+  .bg-nature { background-color: hsl(var(--nature)); }
+  .bg-shadow { background-color: hsl(var(--shadow)); }
+  .bg-light { background-color: hsl(var(--light)); }
+  .bg-arcane { background-color: hsl(var(--arcane)); }
+  .bg-water { background-color: hsl(var(--water)); }
+  .bg-wind { background-color: hsl(var(--wind)); }
+  .bg-earth { background-color: hsl(var(--earth)); }
 }
