@@ -3,6 +3,7 @@ import { MainMenu } from './MainMenu';
 import { Practice } from './Practice';
 import { Settings } from './Settings';
 import { HowToPlay } from './HowToPlay';
+import { PlayMenu } from './PlayMenu';
 import { GameSettings } from '@/types/game';
 
 // Default game settings
@@ -58,6 +59,17 @@ export const GameEngine = () => {
           <Practice 
             onBack={() => handleNavigate('main-menu')} 
             isIPSafe={gameSettings.ipSafeMode}
+          />
+        );
+        
+      case 'play':
+        return (
+          <PlayMenu 
+            onBack={() => handleNavigate('main-menu')}
+            onStartMatch={(mode, data) => {
+              // Handle match start
+              console.log('Starting match:', mode, data);
+            }}
           />
         );
         
