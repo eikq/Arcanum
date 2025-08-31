@@ -408,24 +408,43 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
     setPlayers(prev => prev.map(player => {
       if (player.id === playerId) {
         const newHp = Math.max(0, player.hp - amount);
+        
+        // Check for defeat when HP reaches 0
         if (newHp === 0 && gameState === 'playing') {
-          // Player defeated
           const isPlayerDefeated = playerId === 'player1';
-          setWinner(isPlayerDefeated ? players[1].name : players[0].name);
-          setEndKind(isPlayerDefeated ? 'defeat' : 'victory');
+          
+          // Stop the match immediately
           setGameState('finished');
+          setIsPaused(true);
+          
+          // Stop voice recognition and bot
+          voiceRecognition.stop();
+          if (botOpponentRef.current) {
+            botOpponentRef.current.stop();
+          }
+          
+          // Set winner and end state
+          const winnerName = isPlayerDefeated ? prev.find(p => p.id === 'player2')?.name || 'Opponent' : 'You';
+          setWinner(winnerName);
+          setEndKind(isPlayerDefeated ? 'defeat' : 'victory');
+          
+          // Show end modal after brief delay
+          setTimeout(() => {
+            setShowEndModal(true);
+          }, 1000);
+          
           setShowEndModal(true);
           soundManager.stopMusic();
-          
           if (!isPlayerDefeated) {
             soundManager.music.start('victory');
           }
         }
+        
         return { ...player, hp: newHp };
       }
       return player;
     }));
-  }, [gameState, players]);
+  }, [gameState, voiceRecognition, botOpponentRef]);
 
   const healPlayer = useCallback((playerId: string, amount: number) => {
     setPlayers(prev => prev.map(player => {
