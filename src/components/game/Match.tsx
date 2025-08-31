@@ -538,8 +538,7 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
       return newPaused;
     });
   }, [gameState, voiceRecognition, handleOpponentCast]);
-
-  // End match handlers
+  
   const handlePlayAgain = useCallback(() => {
     console.log('🔄 Starting match restart...');
     
@@ -575,7 +574,7 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
     
     console.log('✅ Match state reset complete');
     startCountdown();
-  }, [mode, startCountdown, voiceRecognition]);
+  }, [mode, startCountdown]);
 
   const handleNextBot = useCallback(() => {
     const difficulties: Array<'easy' | 'medium' | 'hard'> = ['easy', 'medium', 'hard'];
