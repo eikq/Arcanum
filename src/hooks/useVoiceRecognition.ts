@@ -1,21 +1,41 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { VoiceRecognitionState } from '@/types/game';
+import { AudioMeter, AudioMeterState } from '@/audio/AudioMeter';
 
-interface VoiceRecognitionHook extends VoiceRecognitionState {
-  startListening: () => void;
+// NEW: Enhanced SR result types
+export type SRResult = { transcript: string; isFinal: boolean; alt?: string[]; };
+
+export interface VoiceRecognitionHook extends VoiceRecognitionState {
+  startListening: () => Promise<void>;
   stopListening: () => void;
+  restart: () => Promise<void>;
   toggle: () => void;
   resetTranscript: () => void;
+  primeMic: (deviceId?: string) => Promise<MediaStream>;
+  
+  // NEW: Enhanced state
+  interim: string;
+  final: string;
+  supported: boolean;
+  error?: string;
+  dbfs: number;
+  
+  // NEW: Callbacks
+  onInterim?: (transcript: string) => void;
+  onFinal?: (transcript: string) => void;
+  
+  // Deprecated but kept for compatibility
   autoStartListening?: () => Promise<void>;
-  primeMic: (deviceId?: string) => Promise<MediaStream>; // NEW: prime mic with device selection
-  rms: () => number; // NEW: expose RMS for gating
-  micDenied: boolean; // NEW: track mic denial state
+  rms: () => number;
+  micDenied: boolean;
 }
 
 export const useVoiceRecognition = (
   onResult?: (transcript: string, confidence: number, loudness: number) => void,
   hotwordEnabled = false,
-  hotword = 'arcanum'
+  hotword = 'arcanum',
+  onInterim?: (transcript: string) => void,
+  onFinal?: (transcript: string) => void
 ): VoiceRecognitionHook => {
   const [state, setState] = useState<VoiceRecognitionState>({
     isListening: false,
@@ -26,16 +46,20 @@ export const useVoiceRecognition = (
     loudness: 0
   });
 
-  // NEW: Mic denial tracking
+  // NEW: Enhanced state
+  const [interim, setInterim] = useState('');
+  const [final, setFinal] = useState('');
   const [micDenied, setMicDenied] = useState(false);
+  const [error, setError] = useState<string>();
+  const [dbfs, setDbfs] = useState(-60);
 
   const recognitionRef = useRef<SpeechRecognition | null>(null);
-  const audioContextRef = useRef<AudioContext | null>(null);
-  const analyserRef = useRef<AnalyserNode | null>(null);
-  const microphoneRef = useRef<MediaStreamAudioSourceNode | null>(null);
+  const audioMeterRef = useRef<AudioMeter | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
   const restartTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const lastTranscriptRef = useRef<string>('');
   const lastResultTimeRef = useRef<number>(0);
+  const backoffRef = useRef<number>(500);
 
   // Initialize speech recognition
   useEffect(() => {
@@ -116,39 +140,50 @@ export const useVoiceRecognition = (
 
       recognition.onresult = (event) => {
         const results = event.results;
-        const lastResult = results[results.length - 1];
+        let interimTranscript = '';
         
-        if (lastResult && lastResult.isFinal) {
-          const transcript = lastResult[0].transcript.trim().toLowerCase();
-          const confidence = lastResult[0].confidence;
-          const now = Date.now();
-
-          // FIX: RMS gate + debounce
-          const rms = state.loudness;
-          if (rms < 0.08) return; // Require minimum volume
+        // Process all results
+        for (let i = event.resultIndex; i < results.length; i++) {
+          const result = results[i];
+          const transcript = result[0].transcript;
           
-          // Debounce identical transcripts within 500ms
-          if (transcript === lastTranscriptRef.current && 
-              now - lastResultTimeRef.current < 500) {
-            return;
-          }
+          if (result.isFinal) {
+            const cleanTranscript = transcript.trim();
+            const confidence = result[0].confidence || 0.9;
+            const now = Date.now();
 
-          lastTranscriptRef.current = transcript;
-          lastResultTimeRef.current = now;
+            // Update final transcript
+            setFinal(cleanTranscript);
+            onFinal?.(cleanTranscript);
 
-          // Check for hotword if enabled
-          if (hotwordEnabled) {
-            if (transcript.includes(hotword)) {
-              const spellPart = transcript.replace(hotword, '').trim();
-              if (spellPart) {
-                setState(prev => ({ ...prev, transcript: spellPart, confidence }));
-                onResult?.(spellPart, confidence, state.loudness);
+            // Legacy handling - check for hotword if enabled
+            if (hotwordEnabled) {
+              const lowerTranscript = cleanTranscript.toLowerCase();
+              const lowerHotword = hotword.toLowerCase();
+              
+              if (lowerTranscript.includes(lowerHotword)) {
+                const spellPart = lowerTranscript.replace(lowerHotword, '').trim();
+                if (spellPart) {
+                  setState(prev => ({ ...prev, transcript: spellPart, confidence }));
+                  onResult?.(spellPart, confidence, state.loudness);
+                }
               }
+            } else {
+              setState(prev => ({ ...prev, transcript: cleanTranscript, confidence }));
+              onResult?.(cleanTranscript, confidence, state.loudness);
             }
+
+            // Clear interim after final
+            setInterim('');
           } else {
-            setState(prev => ({ ...prev, transcript, confidence }));
-            onResult?.(transcript, confidence, state.loudness);
+            interimTranscript += transcript;
           }
+        }
+        
+        // Update interim transcript
+        if (interimTranscript) {
+          setInterim(interimTranscript.trim());
+          onInterim?.(interimTranscript.trim());
         }
       };
     }
@@ -160,7 +195,7 @@ export const useVoiceRecognition = (
     };
   }, [hotwordEnabled, hotword, onResult, state.isListening, state.loudness]);
 
-  // NEW: Prime microphone with device selection
+  // NEW: Prime microphone with AudioMeter integration
   const primeMic = useCallback(async (deviceId?: string): Promise<MediaStream> => {
     try {
       const constraints: MediaStreamConstraints = {
@@ -174,108 +209,88 @@ export const useVoiceRecognition = (
       };
 
       const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      streamRef.current = stream;
       
-      // Initialize or resume audio context
-      if (!audioContextRef.current) {
-        audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+      // Initialize AudioMeter
+      if (!audioMeterRef.current) {
+        audioMeterRef.current = new AudioMeter();
       }
       
-      if (audioContextRef.current.state === 'suspended') {
-        await audioContextRef.current.resume();
-      }
-
-      // Set up analyser for RMS monitoring
-      analyserRef.current = audioContextRef.current.createAnalyser();
-      microphoneRef.current = audioContextRef.current.createMediaStreamSource(stream);
+      await audioMeterRef.current.initialize(stream);
       
-      microphoneRef.current.connect(analyserRef.current);
-      analyserRef.current.fftSize = 512;
+      // Subscribe to audio meter updates
+      audioMeterRef.current.subscribe((meterState: AudioMeterState) => {
+        setState(prev => ({ ...prev, loudness: meterState.rms }));
+        setDbfs(meterState.dbfs);
+      });
+      
+      audioMeterRef.current.start();
       
       setState(prev => ({ ...prev, hasPermission: true }));
       setMicDenied(false);
-      
-      // Start loudness monitoring
-      monitorLoudness();
+      setError(undefined);
       
       return stream;
     } catch (error) {
       console.error('Failed to prime microphone:', error);
       setState(prev => ({ ...prev, hasPermission: false }));
       setMicDenied(true);
+      setError(error instanceof Error ? error.message : 'Microphone error');
       throw error;
     }
   }, []);
 
-  // FIX: Auto mic detection + init (legacy support)
-  const initializeAudioContext = useCallback(async () => {
-    try {
-      await primeMic();
-    } catch (error) {
-      console.error('Failed to initialize audio context:', error);
+  // NEW: Restart with exponential backoff
+  const restart = useCallback(async () => {
+    if (restartTimeoutRef.current) {
+      clearTimeout(restartTimeoutRef.current);
+      restartTimeoutRef.current = null;
     }
-  }, [primeMic]);
 
-  // FIX: Auto-start on mount for Practice/Match scenes
-  const autoStartListening = useCallback(async () => {
-    if (!state.hasPermission) {
-      await initializeAudioContext();
-    }
-    // Auto-start SR after mic permission
-    setTimeout(() => {
-      if (recognitionRef.current && state.hasPermission && !state.isListening) {
-        try {
-          recognitionRef.current.start();
-        } catch (error) {
-          console.warn('Auto-start failed:', error);
+    const maxBackoff = 5000;
+    restartTimeoutRef.current = setTimeout(async () => {
+      try {
+        if (recognitionRef.current && !state.isListening) {
+          await startListening();
+          backoffRef.current = 500; // Reset backoff on success
         }
+      } catch (error) {
+        console.warn('Failed to restart SR:', error);
+        backoffRef.current = Math.min(maxBackoff, backoffRef.current * 1.5);
+        restart(); // Retry with increased backoff
       }
-    }, 500);
-  }, [state.hasPermission, state.isListening, initializeAudioContext]);
-
-  // Monitor microphone loudness
-  const monitorLoudness = useCallback(() => {
-    if (!analyserRef.current) return;
-
-    const dataArray = new Uint8Array(analyserRef.current.frequencyBinCount);
-    
-    const updateLoudness = () => {
-      if (!analyserRef.current) return;
-      
-      analyserRef.current.getByteFrequencyData(dataArray);
-      
-      // Calculate RMS (Root Mean Square) for loudness
-      let sum = 0;
-      for (let i = 0; i < dataArray.length; i++) {
-        sum += dataArray[i] * dataArray[i];
-      }
-      const rms = Math.sqrt(sum / dataArray.length) / 255;
-      
-      setState(prev => ({ ...prev, loudness: rms }));
-      
-      if (state.isListening) {
-        requestAnimationFrame(updateLoudness);
-      }
-    };
-    
-    updateLoudness();
+    }, backoffRef.current);
   }, [state.isListening]);
 
+  // Legacy support
+  const autoStartListening = useCallback(async () => {
+    if (!state.hasPermission) {
+      await primeMic();
+    }
+    await startListening();
+  }, [state.hasPermission, primeMic]);
+
   const startListening = useCallback(async () => {
-    if (!recognitionRef.current) return;
+    if (!recognitionRef.current) {
+      setError('Speech recognition not available');
+      return;
+    }
     
     if (!state.hasPermission) {
-      await initializeAudioContext();
+      await primeMic();
     }
     
     try {
       recognitionRef.current.start();
       setState(prev => ({ ...prev, isListening: true }));
+      setError(undefined);
     } catch (error) {
       if (error instanceof Error && error.name !== 'InvalidStateError') {
         console.error('Failed to start speech recognition:', error);
+        setError(error.message);
       }
     }
-  }, [state.hasPermission, initializeAudioContext]);
+  }, [state.hasPermission, primeMic]);
 
   const stopListening = useCallback(() => {
     if (restartTimeoutRef.current) {
@@ -285,6 +300,10 @@ export const useVoiceRecognition = (
     
     if (recognitionRef.current) {
       recognitionRef.current.stop();
+    }
+    
+    if (audioMeterRef.current) {
+      audioMeterRef.current.stop();
     }
     
     setState(prev => ({ ...prev, isListening: false }));
@@ -300,9 +319,26 @@ export const useVoiceRecognition = (
 
   const resetTranscript = useCallback(() => {
     setState(prev => ({ ...prev, transcript: '', confidence: 0 }));
+    setInterim('');
+    setFinal('');
   }, []);
 
-  // NEW: Expose RMS for casting gates
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (restartTimeoutRef.current) {
+        clearTimeout(restartTimeoutRef.current);
+      }
+      if (audioMeterRef.current) {
+        audioMeterRef.current.cleanup();
+      }
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(track => track.stop());
+      }
+    };
+  }, []);
+
+  // Legacy RMS getter
   const rms = useCallback(() => {
     return state.loudness;
   }, [state.loudness]);
@@ -311,11 +347,25 @@ export const useVoiceRecognition = (
     ...state,
     startListening,
     stopListening,
+    restart,
     toggle,
     resetTranscript,
+    primeMic,
+    
+    // NEW: Enhanced state
+    interim,
+    final,
+    supported: state.isSupported,
+    error,
+    dbfs,
+    
+    // NEW: Callbacks (for external setting)
+    onInterim,
+    onFinal,
+    
+    // Legacy compatibility
     autoStartListening,
-    primeMic, // NEW: expose primeMic for manual setup
-    rms, // NEW: expose RMS getter
-    micDenied // NEW: expose mic denial state
+    rms,
+    micDenied
   };
 };
