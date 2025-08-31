@@ -1,7 +1,141 @@
 import { Spell } from '@/types/game';
+import { HP_SPELL_LEXICON } from './spell_lexicon';
 
-// Comprehensive Harry Potter spell database with aliases and phonetic matching
+// Convert lexicon entries to full spell objects
+const convertLexiconToSpells = (): Spell[] => {
+  return HP_SPELL_LEXICON.map(entry => ({
+    id: entry.id,
+    name: entry.name,
+    element: entry.element,
+    difficulty: entry.difficulty,
+    type: entry.type,
+    aliases: entry.aliases,
+    phonemes: entry.phonemes,
+    icon: getSpellIcon(entry.id),
+    damage: getSpellDamage(entry.id),
+    healing: getSpellHealing(entry.id),
+    manaCost: getSpellManaCost(entry.id),
+    cooldown: getSpellCooldown(entry.id)
+  }));
+};
+
+// Helper functions to assign spell properties
+function getSpellIcon(id: string): string {
+  const iconMap: Record<string, string> = {
+    expelliarmus: '🪄',
+    stupefy: '⚡',
+    wingardium_leviosa: '🪶',
+    lumos: '💡',
+    nox: '🌑',
+    accio: '🌪️',
+    alohomora: '🗝️',
+    protego: '🛡️',
+    reparo: '🔧',
+    expecto_patronum: '🦌',
+    incendio: '🔥',
+    aguamenti: '💧',
+    diffindo: '⚔️',
+    rictusempra: '😄',
+    obliviate: '🧠',
+    episkey: '💚',
+    sectumsempra: '🗡️',
+    silencio: '🤫',
+    petrificus_totalus: '🗿',
+    imperio: '👁️',
+    crucio: '⚡',
+    avada_kedavra: '💀'
+  };
+  return iconMap[id] || '✨';
+}
+
+function getSpellDamage(id: string): number | undefined {
+  const damageMap: Record<string, number> = {
+    expelliarmus: 45,
+    stupefy: 35,
+    expecto_patronum: 60,
+    incendio: 45,
+    aguamenti: 30,
+    diffindo: 50,
+    rictusempra: 25,
+    sectumsempra: 80,
+    petrificus_totalus: 40,
+    imperio: 55,
+    crucio: 60,
+    avada_kedavra: 999
+  };
+  return damageMap[id];
+}
+
+function getSpellHealing(id: string): number | undefined {
+  const healingMap: Record<string, number> = {
+    episkey: 40
+  };
+  return healingMap[id];
+}
+
+function getSpellManaCost(id: string): number {
+  const costMap: Record<string, number> = {
+    expelliarmus: 25,
+    stupefy: 20,
+    wingardium_leviosa: 25,
+    lumos: 10,
+    nox: 5,
+    accio: 20,
+    alohomora: 15,
+    protego: 25,
+    reparo: 20,
+    expecto_patronum: 80,
+    incendio: 30,
+    aguamenti: 25,
+    diffindo: 35,
+    rictusempra: 20,
+    obliviate: 50,
+    episkey: 30,
+    sectumsempra: 60,
+    silencio: 25,
+    petrificus_totalus: 45,
+    imperio: 70,
+    crucio: 40,
+    avada_kedavra: 100
+  };
+  return costMap[id] || 20;
+}
+
+function getSpellCooldown(id: string): number {
+  const cooldownMap: Record<string, number> = {
+    expelliarmus: 1200,
+    stupefy: 1000,
+    wingardium_leviosa: 2000,
+    lumos: 500,
+    nox: 500,
+    accio: 1500,
+    alohomora: 1000,
+    protego: 2000,
+    reparo: 1500,
+    expecto_patronum: 12000,
+    incendio: 2000,
+    aguamenti: 1500,
+    diffindo: 2500,
+    rictusempra: 1800,
+    obliviate: 8000,
+    episkey: 3000,
+    sectumsempra: 5000,
+    silencio: 3000,
+    petrificus_totalus: 4000,
+    imperio: 10000,
+    crucio: 3000,
+    avada_kedavra: 10000
+  };
+  return cooldownMap[id] || 1500;
+}
+
+// Generate spell database from lexicon
 export const SPELL_DATABASE: Spell[] = [
+// Generate spell database from lexicon
+export const SPELL_DATABASE: Spell[] = convertLexiconToSpells();
+
+// Legacy spell database (keeping for backward compatibility)
+export const LEGACY_SPELL_DATABASE: Spell[] = [
   // OFFENSIVE SPELLS
   {
     id: 'expelliarmus',

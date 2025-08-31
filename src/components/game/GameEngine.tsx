@@ -23,7 +23,8 @@ const DEFAULT_SETTINGS: GameSettings = {
   musicVolume: 0.6,
   voiceVolume: 0.8,
   highContrast: false,
-  fontSize: 100
+  fontSize: 100,
+  pronunciationLeniency: 0.75
 };
 
 export const GameEngine = () => {

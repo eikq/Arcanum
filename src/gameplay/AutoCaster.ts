@@ -1,4 +1,6 @@
-import { matchOrFallback, calculateSpellPower } from "@/utils/spellMatcher";
+import { bestOrFallback } from "@/engine/recognition/SpellRescorer";
+import { calculateSpellPower } from "@/utils/spellMatcher";
+import { SPELL_DATABASE } from "@/data/spells";
 import { canCastGate } from "@/utils/castGating";
 import { soundManager } from "@/audio/SoundManager";
 
@@ -32,7 +34,8 @@ export function handleFinalTranscript(
   const minRms = deps.getMinRms();
   const now = deps.now();
 
-  const { spell, score, matched } = matchOrFallback(finalText, { minScore: minAcc });
+  const { entry, score, matched } = bestOrFallback(finalText, minAcc);
+  const spell = SPELL_DATABASE.find(s => s.id === entry.id) || SPELL_DATABASE[0];
   const normalizedRms = Math.max(0, Math.min(1, (rms - 0.01) / 0.08)); // Simple normalization
   const power = calculateSpellPower(score, rms, normalizedRms, matched);
 

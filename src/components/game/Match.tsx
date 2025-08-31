@@ -11,7 +11,7 @@ import { EndMatchModal, type EndKind } from './EndMatchModal';
 import { CooldownRing } from '@/components/ui/cooldown-ring';
 import { MicGauge } from '@/components/ui/mic-gauge';
 import { handleFinalTranscript, resetCastHistory, type AutoCasterDeps } from '@/gameplay/AutoCaster';
-import { findSpellMatches } from '@/utils/spellMatcher';
+import { rescoreSpell } from '@/engine/recognition/SpellRescorer';
 import { SPELL_DATABASE } from '@/data/spells';
 import { SpellElement } from '@/types/game';
 import { soundManager } from '@/audio/SoundManager';
@@ -108,11 +108,11 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
       }
       
       // Show live spell guesses
-      const matches = findSpellMatches(transcript, 0.2, 3);
+      const matches = rescoreSpell(transcript, 3);
       setTopGuesses(matches.map(match => ({
-        spellId: match.spell.id,
-        name: match.spell.name,
-        score: match.accuracy
+        spellId: match.id,
+        name: match.name,
+        score: match.score
       })));
     },
     onFinal: (transcript: string) => {

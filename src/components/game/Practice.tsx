@@ -10,8 +10,10 @@ import { SpellCard } from './SpellCard';
 import { MicGauge } from '@/components/ui/mic-gauge';
 import { DiagnosticOverlay, DiagnosticState } from '@/components/ui/diagnostic-overlay';
 import { CooldownRing } from '@/components/ui/cooldown-ring';
-import { findSpellMatches, calculateSpellPower } from '@/utils/spellMatcher';
+import { rescoreSpell } from '@/engine/recognition/SpellRescorer';
+import { calculateSpellPower } from '@/utils/spellMatcher';
 import { canCastGate, canCast, markCast, getRemainingCooldown } from '@/utils/castGating';
+import { rescoreSpell } from '@/engine/recognition/SpellRescorer';
 import { AudioMeter } from '@/audio/AudioMeter';
 import { SPELL_DATABASE } from '@/data/spells';
 import { Spell, SpellElement, SpellDifficulty } from '@/types/game';
@@ -65,12 +67,12 @@ export const Practice = ({ onBack, isIPSafe }: PracticeProps) => {
       return;
     }
 
-    // Lightweight matching for real-time preview
-    const matches = findSpellMatches(transcript, 0.2, 3);
+    // Use new rescoring system for real-time preview
+    const matches = rescoreSpell(transcript, 3);
     setTopGuesses(matches.map(match => ({
-      spellId: match.spell.id,
-      name: match.spell.name,
-      score: match.accuracy
+      spellId: match.id,
+      name: match.name,
+      score: match.score
     })));
   }, []);
 

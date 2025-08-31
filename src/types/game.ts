@@ -86,6 +86,7 @@ export interface GameSettings {
   voiceVolume: number;
   highContrast: boolean;
   fontSize: number;
+  pronunciationLeniency: number;
 }
 
 export interface ElementalCombo {

@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { subscribeMicState, acquireMic, reacquireMic, type MicState } from '@/audio/MicBootstrap';
+import { applySpellGrammar } from '@/engine/recognition/SRGrammar';
 
 export type SRResult = { transcript: string; isFinal: boolean; alt?: string[] };
 
@@ -79,6 +80,9 @@ export const useVoiceRecognition = (
       recognition.interimResults = true;
       recognition.lang = 'en-US';
       recognition.maxAlternatives = 3;
+
+      // Apply spell grammar boost (safe fallback if unsupported)
+      applySpellGrammar(recognition);
 
       recognitionRef.current = recognition;
 

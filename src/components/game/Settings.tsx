@@ -23,6 +23,7 @@ interface SettingsProps {
     hotwordEnabled: boolean;
     hotword: string;
     selectedMicDevice?: string;
+    minAccuracy: number;
   };
   onSettingsChange: (newSettings: any) => void;
   onBack: () => void;
@@ -256,18 +257,21 @@ export const Settings = ({ settings, onSettingsChange, onBack }: SettingsProps) 
               <div className="space-y-2">
                 <div className="flex justify-between">
                   <Label>Pronunciation Leniency</Label>
-                  <Badge variant="secondary">{(settings.pronunciationLeniency * 100).toFixed(0)}%</Badge>
+                  <Badge variant="secondary">{((1 - settings.minAccuracy) * 100).toFixed(0)}%</Badge>
                 </div>
                 <Slider
-                  value={[settings.pronunciationLeniency * 100]}
-                  onValueChange={([value]) => handlePronunciationLeniencyChange(value / 100)}
-                  min={10}
-                  max={70}
+                  value={[(1 - settings.minAccuracy) * 100]}
+                  onValueChange={([value]) => onSettingsChange({
+                    ...settings,
+                    minAccuracy: 1 - (value / 100)
+                  })}
+                  min={15}
+                  max={60}
                   step={5}
                   className="w-full"
                 />
                 <p className="text-xs text-muted-foreground">
-                  Lower = accepts poorer pronunciation
+                  Higher = accepts poorer pronunciation (min accuracy: {(settings.minAccuracy * 100).toFixed(0)}%)
                 </p>
               </div>
 
