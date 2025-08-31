@@ -1,6 +1,9 @@
 import { Howl, Howler } from 'howler';
 import { SpellElement } from '@/types/game';
 
+export type ElementKey = SpellElement;
+export type Channel = "ui" | "cast" | "impact" | "music";
+
 interface SoundConfig {
   volume?: number;
   pitch?: number;
@@ -22,6 +25,7 @@ export class SoundManager {
   private musicVolume = 0.6;
   private isInitialized = false;
   private audioContext: AudioContext | null = null; // NEW: add audioContext
+  private isMuted = false;
 
   // Sound data URIs - minimal demo sounds
   private soundData: Record<string, string> = {
@@ -132,6 +136,65 @@ export class SoundManager {
     } catch (error) {
       console.warn('Failed to initialize audio:', error);
     }
+  }
+
+  // NEW: Enhanced API for AutoCaster integration
+  playUI(id: "click" | "back" | "error"): void {
+    if (!this.isInitialized || this.isMuted) return;
+
+    const soundId = `ui_${id}`;
+    const sound = this.sounds.get(soundId);
+    if (sound) {
+      sound.volume(this.sfxVolume * this.masterVolume * 0.5);
+      sound.play();
+    }
+  }
+
+  play(kind: "cast" | "impact", element?: ElementKey, opts?: { gain?: number; pitch?: number }): void {
+    if (!this.isInitialized || this.isMuted) return;
+    
+    if (kind === "cast" && element) {
+      this.playCast(element, opts?.gain || 0.8, { 
+        volume: opts?.gain, 
+        pitch: opts?.pitch 
+      });
+    } else if (kind === "impact" && element) {
+      this.playImpact(element, { 
+        volume: opts?.gain, 
+        pitch: opts?.pitch 
+      });
+    }
+  }
+
+  music = {
+    start: (id: "battle_theme" | "menu_ambient" | "victory") => {
+      if (!this.isInitialized || this.isMuted) return;
+      this.playMusic(id);
+    },
+    stop: () => {
+      this.stopMusic();
+    },
+    setVolume: (v: number) => {
+      this.setMusicVolume(v);
+    }
+  };
+
+  setVolumes(v: { ui: number; sfx: number; music: number }): void {
+    this.masterVolume = Math.max(v.ui, v.sfx, v.music); // Use highest as master
+    this.sfxVolume = v.sfx;
+    this.musicVolume = v.music;
+    this.updateAllVolumes();
+  }
+
+  setMuted(muted: boolean): void {
+    this.isMuted = muted;
+    if (muted) {
+      this.stopMusic();
+    }
+  }
+
+  getMuted(): boolean {
+    return this.isMuted;
   }
 
   // NEW: Enhanced cast sound with element variation
