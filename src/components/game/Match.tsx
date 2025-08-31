@@ -11,7 +11,7 @@ import { EndMatchModal, type EndKind } from './EndMatchModal';
 import { CooldownRing } from '@/components/ui/cooldown-ring';
 import { MicGauge } from '@/components/ui/mic-gauge';
 import { handleFinalTranscript, resetCastHistory, type AutoCasterDeps } from '@/gameplay/AutoCaster';
-import { rescoreSpell } from '@/engine/recognition/SpellRescorer';
+import { rescoreSpell, bestOrFallback } from '@/engine/recognition/SpellRescorer';
 import { SPELL_DATABASE } from '@/data/spells';
 import { SpellElement } from '@/types/game';
 import { soundManager } from '@/audio/SoundManager';
@@ -118,21 +118,30 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
     onFinal: (transcript: string) => {
       if (gameState !== 'playing' || isPaused || !transcript.trim()) return;
       
-      // Use AutoCaster for consistent casting logic
-      const deps: AutoCasterDeps = {
-        getRms: () => audioMeterRef.current?.getRms() || 0,
-        getMinRms: () => audioMeterRef.current?.getCalibration().minRms || 0.02,
-        getCooldownMs: () => 1000,
-        hotwordEnabled: () => settings.hotwordEnabled || false,
-        hotword: () => settings.hotword || 'arcanum',
-        now: () => performance.now(),
-        onCast: (payload) => {
-          handlePlayerCast(payload);
-        },
-        onDebug: (msg) => console.log('AutoCaster:', msg)
-      };
+      // Check cooldown
+      if (!canCast(1000)) {
+        return;
+      }
       
-      handleFinalTranscript(transcript, deps, settings.minAccuracy || 0.25, settings.alwaysCast !== false);
+      // Use rescoring system to find best spell match
+      const { entry, score, matched } = bestOrFallback(transcript, 0.4);
+      const spell = SPELL_DATABASE.find(s => s.id === entry.id) || SPELL_DATABASE[0];
+      
+      // Calculate power
+      const rms = audioMeterRef.current?.getRms() || 0;
+      const normalizedRms = audioMeterRef.current?.normalizedRms(rms) || 0;
+      const power = Math.min(score * 0.6 + normalizedRms * 0.4, 1.0);
+      
+      // Cast the spell
+      handlePlayerCast({
+        spellId: spell.id,
+        accuracy: score,
+        loudness: rms,
+        power,
+        assist: !matched
+      });
+      
+      markCast();
     }
   });
 
