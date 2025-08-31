@@ -131,6 +131,7 @@ function getSpellCooldown(id: string): number {
 
 // Generate spell database from lexicon
 export const SPELL_DATABASE: Spell[] = [
+]
 // Generate spell database from lexicon
 export const SPELL_DATABASE: Spell[] = convertLexiconToSpells();
 
