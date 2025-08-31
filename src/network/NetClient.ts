@@ -1,16 +1,8 @@
 import { io, Socket } from 'socket.io-client';
+import type { ServerToClientEvents, ClientToServerEvents, CastPayload } from '../shared/events';
 
 export type QueueMode = 'quick' | 'code' | 'bot';
 export type GameMode = 'quick' | 'code' | 'bot' | 'practice';
-
-export interface CastPayload {
-  roomId: string;
-  spellId: string;
-  accuracy: number;
-  loudness: number;
-  power: number;
-  ts: number;
-}
 
 export interface GameState {
   players: Array<{
@@ -43,7 +35,7 @@ export interface NetEvents {
 }
 
 export class NetClient {
-  private socket: Socket | null = null;
+  private socket: Socket<ServerToClientEvents, ClientToServerEvents> | null = null;
   private lastCastTime = 0;
   private castCooldown = 1000; // 1 second minimum between casts
   private lastCastData = new Map<string, number>(); // spellId -> timestamp for deduplication
@@ -141,20 +133,20 @@ export class NetClient {
   }
 
   // Voice chat signaling
-  sendSignal(to: string, data: any): void {
+  sendSignal(roomId: string, to: string, data: any): void {
     if (!this.socket) return;
-    this.socket.emit('rtc:signal', { to, data });
+    this.socket.emit('rtc:signal', { roomId, to, sdp: data.sdp, ice: data.ice });
   }
 
   // Event listeners
-  on<K extends keyof NetEvents>(event: K, callback: (data: NetEvents[K]) => void): void {
+  on<K extends keyof ServerToClientEvents>(event: K, callback: ServerToClientEvents[K]): void {
     if (!this.socket) return;
-    this.socket.on(event, callback);
+    this.socket.on(event, callback as any);
   }
 
-  off<K extends keyof NetEvents>(event: K, callback?: Function): void {
+  off<K extends keyof ServerToClientEvents>(event: K, callback?: Function): void {
     if (!this.socket) return;
-    this.socket.off(event, callback);
+    this.socket.off(event, callback as any);
   }
 
   // Anti-spam protection

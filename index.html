@@ -1,22 +1,242 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.ico" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Arcanum - Voice-Activated Spellcasting Game</title>
-    <meta name="description" content="Master the ancient art of voice-activated spellcasting. Speak incantations, cast spells, and battle wizards in this immersive browser game." />
-    <meta name="author" content="Arcanum Studios" />
+    <title>Arcanum - Voice Spellcasting Game</title>
+    <meta name="description" content="Cast spells with your voice in this magical multiplayer battle arena. Practice pronunciation, duel opponents, and master the arcane arts." />
+    <meta name="keywords" content="voice game, spellcasting, multiplayer, pronunciation, magic, wizard, duel" />
+    <link rel="canonical" href="/" />
+    
+    <!-- JSON-LD for SEO -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "VideoGame",
+      "name": "Arcanum",
+      "description": "A voice-activated spellcasting game where players cast spells through speech recognition",
+      "genre": "Action",
+      "playMode": "MultiPlayer",
+      "applicationCategory": "Game",
+      "operatingSystem": "Web Browser",
+      "offers": {
+        "@type": "Offer",
+        "price": "0",
+        "priceCurrency": "USD"
+      }
+    }
+    </script>
 
-    <meta property="og:title" content="Arcanum - Voice-Activated Spellcasting Game" />
-    <meta property="og:description" content="Master the ancient art of voice-activated spellcasting. Speak incantations, cast spells, and battle wizards in this immersive browser game." />
-    <meta property="og:type" content="website" />
-    <meta property="og:image" content="https://lovable.dev/opengraph-image-p98pqg.png" />
+    <!-- Asset Manifest -->
+    <script type="application/json" id="manifest">
+    {
+      "version": "1.0.0",
+      "assets": [
+        {
+          "id": "sigil_fire",
+          "type": "sprite",
+          "element": "fire",
+          "src": "data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNDAiIGhlaWdodD0iNDAiIHZpZXdCb3g9IjAgMCA0MCA0MCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPGNpcmNsZSBjeD0iMjAiIGN5PSIyMCIgcj0iMTgiIGZpbGw9IiNGRjY3MDAiIGZpbGwtb3BhY2l0eT0iMC4yIi8+CjxwYXRoIGQ9Ik0yMCAzMkMyNiAyOCAzMCAyNCAzMCAyMEMzMCAxNiAyNiAxMiAyMCAxNkMxNCAxMiAxMCAxNiAxMCAyMEMxMCAyNCAxNCAyOCAyMCAzMloiIGZpbGw9IiNGRjY3MDAiLz4KPC9zdmc+",
+          "frames": 1,
+          "fps": 0,
+          "loop": false,
+          "pivot": {"x": 0.5, "y": 0.5}
+        },
+        {
+          "id": "sigil_ice",
+          "type": "sprite", 
+          "element": "ice",
+          "src": "data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNDAiIGhlaWdodD0iNDAiIHZpZXdCb3g9IjAgMCA0MCA0MCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPGNpcmNsZSBjeD0iMjAiIGN5PSIyMCIgcj0iMTgiIGZpbGw9IiMwMDg4RkYiIGZpbGwtb3BhY2l0eT0iMC4yIi8+CjxwYXRoIGQ9Ik0yMCA4TDI0IDEyTDMyIDEyTDI4IDE2TDMyIDIwTDI0IDIwTDIwIDI0TDE2IDIwTDggMjBMMTIgMTZMOCAxMkwxNiAxMkwyMCA4WiIgZmlsbD0iIzAwODhGRiIvPgo8L3N2Zz4=",
+          "frames": 1,
+          "fps": 0,
+          "loop": false,
+          "pivot": {"x": 0.5, "y": 0.5}
+        },
+        {
+          "id": "whoosh",
+          "type": "sfx",
+          "src": "data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhCjWB0P"
+        },
+        {
+          "id": "cast_rune",
+          "type": "sfx", 
+          "src": "data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhCjWB0P"
+        },
+        {
+          "id": "music_theme",
+          "type": "music",
+          "src": "data:audio/ogg;base64,T2dnUwACAAAAAAAAAABSAAAAAAAAAO7t3t8BHgF2b3JiaXMAAAAAARErAAAAAAAAAGKzAQEAAQA=",
+          "loop": true
+        }
+      ],
+      "ui": {
+        "icons": [
+          {
+            "id": "fire_icon",
+            "spellId": "incendio",
+            "path": "data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjQiIGhlaWdodD0iMjQiIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHBhdGggZD0iTTEyIDIwQzE2IDIwIDIwIDE2IDIwIDEyQzIwIDggMTYgNCA4IDhDOCA4IDggOCAxMiA4VjJMMTIgMjBaIiBmaWxsPSIjRkY2NzAwIi8+Cjwvc3ZnPg==",
+            "size": "24x24"
+          }
+        ]
+      }
+    }
+    </script>
 
-    <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:site" content="@lovable_dev" />
-    <meta name="twitter:image" content="https://lovable.dev/opengraph-image-p98pqg.png" />
+    <!-- Server Snippet -->
+    <script type="text/plain" id="server-snippet">
+/* eslint-disable */
+const express = require("express");
+const { createServer } = require("http");
+const { Server } = require("socket.io");
+const crypto = require("crypto");
+
+const app = express();
+const httpServer = createServer(app);
+const io = new Server(httpServer, {
+  cors: { origin: "*" }
+});
+
+const quickQueue = [];
+const rooms = new Map();
+const lastCast = new Map();
+
+const roomCode = () => crypto.randomBytes(3).toString("hex").toUpperCase();
+
+io.on("connection", (sock) => {
+  console.log("Player connected:", sock.id);
+
+  sock.on("queue:join", (data, ack) => {
+    try {
+      console.log("Queue join:", data);
+      
+      if (data.mode === "quick") {
+        if (quickQueue.length && quickQueue[0] !== sock.id) {
+          const other = quickQueue.shift();
+          const id = roomCode();
+          rooms.set(id, { id, a: other, b: sock.id, vsBot: false });
+          
+          io.to(other).emit("match:found", { 
+            roomId: id, 
+            players: [{id: other}, {id: sock.id}], 
+            vsBot: false 
+          });
+          sock.emit("match:found", { 
+            roomId: id, 
+            players: [{id: other}, {id: sock.id}], 
+            vsBot: false 
+          });
+          
+          setTimeout(() => {
+            io.to([other, sock.id]).emit("match:start", { roomId: id, countdown: 3 });
+          }, 200);
+        } else {
+          quickQueue.push(sock.id);
+          sock.emit("queue:waiting", { eta: 10 });
+          
+          // Fallback to bot after 15s
+          setTimeout(() => {
+            if (quickQueue.includes(sock.id)) {
+              quickQueue.splice(quickQueue.indexOf(sock.id), 1);
+              const id = roomCode();
+              rooms.set(id, { id, a: sock.id, vsBot: true });
+              sock.emit("match:found", { 
+                roomId: id, 
+                players: [{id: sock.id}], 
+                vsBot: true 
+              });
+              setTimeout(() => {
+                sock.emit("match:start", { roomId: id, countdown: 3 });
+              }, 200);
+            }
+          }, 15000);
+        }
+      } else if (data.mode === "code") {
+        const id = (data.roomCode || roomCode()).toUpperCase();
+        const r = rooms.get(id);
+        
+        if (!r) { 
+          rooms.set(id, { id, a: sock.id, vsBot: false }); 
+          ack?.(true, id); 
+        } else if (!r.b) { 
+          r.b = sock.id; 
+          io.to([r.a, sock.id]).emit("match:found", { 
+            roomId: id, 
+            players: [{id: r.a}, {id: sock.id}], 
+            vsBot: false 
+          }); 
+          setTimeout(() => {
+            io.to([r.a, sock.id]).emit("match:start", { roomId: id, countdown: 3 });
+          }, 200); 
+          ack?.(true, id); 
+        } else {
+          ack?.(false, "Room full");
+        }
+      } else if (data.mode === "bot") {
+        const id = roomCode();
+        rooms.set(id, { id, a: sock.id, vsBot: true });
+        sock.emit("match:found", { 
+          roomId: id, 
+          players: [{id: sock.id}], 
+          vsBot: true 
+        });
+        setTimeout(() => {
+          sock.emit("match:start", { roomId: id, countdown: 3 });
+        }, 200);
+      }
+    } catch (e) { 
+      console.error("Queue join error:", e);
+      ack?.(false, String(e)); 
+    }
+  });
+
+  sock.on("cast", (payload) => {
+    const now = Date.now();
+    const last = lastCast.get(sock.id) || 0;
+    if (now - last < 800) return; // throttle
+    
+    lastCast.set(sock.id, now);
+    console.log("Cast:", payload);
+    sock.broadcast.emit("cast", payload);
+  });
+
+  sock.on("state:update", (data) => { 
+    sock.broadcast.emit("state:update", data); 
+  });
+  
+  sock.on("rtc:signal", (data) => { 
+    sock.broadcast.emit("rtc:signal", { ...data, from: sock.id }); 
+  });
+  
+  sock.on("disconnect", () => { 
+    console.log("Player disconnected:", sock.id);
+    // Remove from queue
+    const queueIndex = quickQueue.indexOf(sock.id);
+    if (queueIndex > -1) {
+      quickQueue.splice(queueIndex, 1);
+    }
+    
+    io.emit("opponent:left", { reason: "disconnect" }); 
+  });
+});
+
+const PORT = process.env.PORT || 5175;
+httpServer.listen(PORT, () => {
+  console.log(`Game server listening on port ${PORT}`);
+  console.log("Set client SERVER_URL to http://localhost:" + PORT);
+});
+
+/*
+Setup Instructions:
+1. Create a new folder: mkdir arcanum-server && cd arcanum-server
+2. Initialize: npm init -y
+3. Install dependencies: npm install express socket.io
+4. Copy this code to server.js
+5. Run: node server.js
+6. Update client SERVER_URL to http://localhost:5175
+*/
+    </script>
   </head>
-
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>

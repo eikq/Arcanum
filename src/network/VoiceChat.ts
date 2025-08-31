@@ -51,9 +51,8 @@ export class VoiceChat {
       // Handle ICE candidates
       this.peerConnection.onicecandidate = (event) => {
         if (event.candidate) {
-          netClient.sendSignal('*', {
-            type: 'ice-candidate',
-            candidate: event.candidate,
+          netClient.sendSignal('room', '*', {
+            ice: event.candidate,
           });
         }
       };
@@ -79,9 +78,8 @@ export class VoiceChat {
       const offer = await this.peerConnection.createOffer();
       await this.peerConnection.setLocalDescription(offer);
       
-      netClient.sendSignal(peerId, {
-        type: 'offer',
-        offer: offer,
+      netClient.sendSignal('room', peerId, {
+        sdp: offer,
       });
     } catch (error) {
       console.error('Failed to create call:', error);
@@ -97,9 +95,8 @@ export class VoiceChat {
           await this.peerConnection.setRemoteDescription(data.offer);
           const answer = await this.peerConnection.createAnswer();
           await this.peerConnection.setLocalDescription(answer);
-          netClient.sendSignal('*', {
-            type: 'answer',
-            answer: answer,
+          netClient.sendSignal('room', '*', {
+            sdp: answer,
           });
           break;
 
@@ -162,7 +159,7 @@ export class VoiceChat {
 
   private setupRTCEventListeners(): void {
     netClient.on('rtc:signal', (data) => {
-      this.handleSignal(data.data);
+      this.handleSignal({ sdp: data.sdp, ice: data.ice });
     });
   }
 }

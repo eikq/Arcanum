@@ -405,13 +405,13 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
     setIsPaused(prev => {
       const newPaused = !prev;
       if (newPaused) {
-        stopListening();
+        voiceRecognition.stopListening();
         if (botOpponentRef.current) {
           botOpponentRef.current.stop();
         }
       } else {
         if (hasPermission) {
-          startListening();
+          voiceRecognition.startListening();
         }
         if (botOpponentRef.current) {
           botOpponentRef.current.start(handleOpponentCast);
@@ -419,7 +419,7 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
       }
       return newPaused;
     });
-  }, [gameState, hasPermission, startListening, stopListening, handleOpponentCast]);
+  }, [gameState, hasPermission, voiceRecognition.startListening, voiceRecognition.stopListening, handleOpponentCast]);
 
   // Keyboard controls
   useEffect(() => {
@@ -602,10 +602,15 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
       {/* Voice Indicator */}
       <div className="fixed bottom-4 left-4 z-20">
         <VoiceIndicator
-          loudness={loudness}
-          hasPermission={hasPermission}
-          transcript={transcript}
-          confidence={confidence}
+          voiceState={{
+            isListening,
+            isSupported,
+            hasPermission,
+            transcript,
+            confidence,
+            loudness
+          }}
+          onToggle={voiceRecognition.toggle}
         />
       </div>
 
