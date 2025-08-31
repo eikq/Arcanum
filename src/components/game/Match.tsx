@@ -380,7 +380,6 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
     }
     
     // Consume mana
-    const manaCost = spell.manaCost || 20;
     setPlayers(prev => prev.map(player => {
       if (player.id === 'player1') {
         return { ...player, mana: Math.max(0, player.mana - manaCost) };
@@ -496,7 +495,6 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
     }
     
     // Consume opponent mana
-    const manaCost = spell.manaCost || 20;
     setPlayers(prev => prev.map(player => {
       if (player.id === 'player2') {
         return { ...player, mana: Math.max(0, player.mana - manaCost) };
