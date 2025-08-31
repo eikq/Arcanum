@@ -82,26 +82,6 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
   const hotwordEnabled = settings.hotwordEnabled || false;
   const hotword = settings.hotword || 'arcanum';
   
-  // Casting visuals
-  const [activeCasts, setActiveCasts] = useState<{
-    player1?: { element: SpellElement; timestamp: number };
-    player2?: { element: SpellElement; timestamp: number };
-  }>({});
-  const [activeProjectiles, setActiveProjectiles] = useState<any[]>([]);
-  const projectileIdRef = useRef(0);
-  
-  // UI
-  const [showingDamage, setShowingDamage] = useState<{ amount: number; type: 'damage' | 'heal'; position: { x: number; y: number } } | null>(null);
-  const [matchDuration, setMatchDuration] = useState(0);
-  
-  // Refs
-  const vfxCanvasRef = useRef<HTMLCanvasElement>(null);
-  const remoteAudioRef = useRef<HTMLAudioElement>(null);
-  const vfxManagerRef = useRef<any>(null);
-  const botOpponentRef = useRef<BotOpponent | null>(null);
-  const matchStartTimeRef = useRef<number>(0);
-  const audioMeterRef = useRef<AudioMeter | null>(null);
-  
   // Voice recognition with AutoCaster integration
   const voiceRecognition = useVoiceRecognition(
     undefined, // Legacy onResult callback
@@ -156,6 +136,28 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
     }
   );
 
+  const { isListening, transcript, confidence, loudness, hasPermission, isSupported, interim, final } = voiceRecognition;
+
+  // Casting visuals
+  const [activeCasts, setActiveCasts] = useState<{
+    player1?: { element: SpellElement; timestamp: number };
+    player2?: { element: SpellElement; timestamp: number };
+  }>({});
+  const [activeProjectiles, setActiveProjectiles] = useState<any[]>([]);
+  const projectileIdRef = useRef(0);
+  
+  // UI
+  const [showingDamage, setShowingDamage] = useState<{ amount: number; type: 'damage' | 'heal'; position: { x: number; y: number } } | null>(null);
+  const [matchDuration, setMatchDuration] = useState(0);
+  
+  // Refs
+  const vfxCanvasRef = useRef<HTMLCanvasElement>(null);
+  const remoteAudioRef = useRef<HTMLAudioElement>(null);
+  const vfxManagerRef = useRef<any>(null);
+  const botOpponentRef = useRef<BotOpponent | null>(null);
+  const matchStartTimeRef = useRef<number>(0);
+  const audioMeterRef = useRef<AudioMeter | null>(null);
+  
   // Handle mic toggle with proper async handling
   const handleMicToggle = useCallback(async () => {
     try {
@@ -181,8 +183,6 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
       });
     }
   }, [isListening, voiceRecognition]);
-
-  const { isListening, transcript, confidence, loudness, hasPermission, isSupported, interim, final } = voiceRecognition;
 
   // Initialize systems
   useEffect(() => {
@@ -536,6 +536,15 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
 
   // End match handlers
   const handlePlayAgain = useCallback(() => {
+    console.log('🔄 Starting match restart...');
+    
+    // Stop all systems first
+    voiceRecognition.stop();
+    if (botOpponentRef.current) {
+      botOpponentRef.current.stop();
+    }
+    soundManager.stopMusic();
+    
     // Reset match state
     setGameState('countdown');
     setPlayers([
@@ -547,6 +556,19 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
     setShowEndModal(false);
     setTotalDamageDealt(0);
     setTotalDamageTaken(0);
+    setIsPaused(false);
+    setActiveCasts({});
+    setActiveProjectiles([]);
+    setTopGuesses([]);
+    setGlobalCooldown(false);
+    setLastCastTime(0);
+    setMatchDuration(0);
+    setMatchStartTime(0);
+    
+    // Reset voice recognition state completely
+    voiceRecognition.resetTranscript();
+    
+    console.log('✅ Match state reset complete');
     startCountdown();
   }, [mode, startCountdown]);
 
