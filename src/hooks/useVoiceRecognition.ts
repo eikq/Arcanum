@@ -154,8 +154,12 @@ export const useVoiceRecognition = (
             setFinal(transcript);
             setTranscript(transcript);
             setConfidence(confidence);
-            onFinalCallback?.(transcript, micStateRef.current?.rms || 0, micStateRef.current?.dbfs || -60);
-            onResult?.(transcript, confidence, loudness);
+            if (onFinalCallback) {
+              onFinalCallback(transcript, micStateRef.current?.rms || 0, micStateRef.current?.dbfs || -60);
+            }
+            if (onResult) {
+              onResult(transcript, confidence, loudness);
+            }
 
             // Clear interim after final
             setInterim('');
@@ -167,7 +171,9 @@ export const useVoiceRecognition = (
         // Update interim transcript
         if (interimTranscript) {
           setInterim(interimTranscript);
-          onInterimCallback?.(interimTranscript, micStateRef.current?.rms || 0, micStateRef.current?.dbfs || -60);
+          if (onInterimCallback) {
+            onInterimCallback(interimTranscript, micStateRef.current?.rms || 0, micStateRef.current?.dbfs || -60);
+          }
         }
       };
     } else {
