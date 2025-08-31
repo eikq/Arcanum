@@ -21,6 +21,7 @@ export class SoundManager {
   private sfxVolume = 0.8;
   private musicVolume = 0.6;
   private isInitialized = false;
+  private audioContext: AudioContext | null = null; // NEW: add audioContext
 
   // Sound data URIs - minimal demo sounds
   private soundData: Record<string, string> = {
@@ -98,6 +99,8 @@ export class SoundManager {
     if (this.isInitialized) return;
 
     try {
+      // Initialize AudioContext for procedural sounds
+      this.audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
       // Load all sound effects
       for (const [id, dataUri] of Object.entries(this.soundData)) {
         const howl = new Howl({
@@ -131,12 +134,62 @@ export class SoundManager {
     }
   }
 
+  // NEW: Enhanced cast sound with element variation
+  playElementSound(element: SpellElement, type: 'cast' | 'impact', power: number = 1, pitch: number = 1) {
+    if (!this.audioContext) return;
+    
+    const elementFreqs: Record<SpellElement, number> = {
+      fire: 440, ice: 330, lightning: 880, nature: 220,
+      shadow: 165, light: 660, arcane: 550, water: 293,
+      wind: 415, earth: 196
+    };
+    
+    const baseFreq = elementFreqs[element] * pitch * (1 + (Math.random() - 0.5) * 0.06);
+    const t = this.audioContext.currentTime;
+    
+    // Whoosh layer
+    const o1 = this.audioContext.createOscillator();
+    o1.type = type === 'cast' ? 'sawtooth' : 'square';
+    o1.frequency.setValueAtTime(baseFreq * 0.5, t);
+    o1.frequency.exponentialRampToValueAtTime(baseFreq, t + 0.1);
+    
+    const g1 = this.audioContext.createGain();
+    g1.gain.setValueAtTime(0.0001, t);
+    g1.gain.exponentialRampToValueAtTime(0.2 * power, t + 0.05);
+    g1.gain.exponentialRampToValueAtTime(0.0001, t + (type === 'cast' ? 0.4 : 0.2));
+    
+    // Element chime
+    const o2 = this.audioContext.createOscillator();
+    o2.type = 'sine';
+    o2.frequency.value = baseFreq * (type === 'cast' ? 2 : 1.5);
+    
+    const g2 = this.audioContext.createGain();
+    g2.gain.setValueAtTime(0.0001, t + 0.1);
+    g2.gain.exponentialRampToValueAtTime(0.15 * power, t + 0.15);
+    g2.gain.exponentialRampToValueAtTime(0.0001, t + (type === 'cast' ? 0.5 : 0.3));
+    
+    o1.connect(g1).connect(this.audioContext.destination);
+    o2.connect(g2).connect(this.audioContext.destination);
+    
+    o1.start(t);
+    o1.stop(t + (type === 'cast' ? 0.4 : 0.2));
+    o2.start(t + 0.1);
+    o2.stop(t + (type === 'cast' ? 0.5 : 0.3));
+  }
+
   // Cast sound with elemental layers
   playCast(element: SpellElement, loudness: number = 0.8, config: SoundConfig = {}): void {
-    if (!this.isInitialized) return;
+    if (!this.isInitialized) {
+      // Fallback to procedural sound
+      this.playElementSound(element, 'cast', loudness);
+      return;
+    }
 
     const elementSounds = this.elementalSounds[element];
-    if (!elementSounds) return;
+    if (!elementSounds) {
+      this.playElementSound(element, 'cast', loudness);
+      return;
+    }
 
     // Play cast sounds with loudness-based volume and pitch variation
     elementSounds.cast.forEach((soundId, index) => {

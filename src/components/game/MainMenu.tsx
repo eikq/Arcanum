@@ -33,7 +33,7 @@ export const MainMenu = ({ onNavigate }: MainMenuProps) => {
       description: 'Test your skills against magical constructs',
       icon: Bot,
       gradient: 'from-arcane to-lightning',
-      onClick: () => onNavigate('bot-select')
+      onClick: () => onNavigate('match:bot:medium') // FIX: Direct to bot match
     }
   ];
 

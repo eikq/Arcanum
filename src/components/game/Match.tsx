@@ -6,8 +6,11 @@ import { Card, CardContent } from '@/components/ui/card';
 import { toast } from '@/hooks/use-toast';
 import { VoiceIndicator } from './VoiceIndicator';
 import { useVoiceRecognition } from '@/hooks/useVoiceRecognition';
+import { Caster } from './Caster';
+import { Projectile } from './Projectile';
 import { findSpellMatches } from '@/utils/spellMatcher';
 import { SPELL_DATABASE } from '@/data/spells';
+import { SpellElement } from '@/types/game';
 import { soundManager } from '@/audio/SoundManager';
 import { createVFXManager } from '@/vfx/VFXManager';
 import { createBotOpponent, BotOpponent } from '@/ai/BotOpponent';
@@ -72,6 +75,14 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
   const [isMuted, setIsMuted] = useState(false);
   const [isVoiceChatMuted, setIsVoiceChatMuted] = useState(true);
   
+  // NEW: Casting visuals
+  const [activeCasts, setActiveCasts] = useState<{
+    player1?: { element: SpellElement; timestamp: number };
+    player2?: { element: SpellElement; timestamp: number };
+  }>({});
+  const [activeProjectiles, setActiveProjectiles] = useState<any[]>([]);
+  const projectileIdRef = useRef(0);
+  
   // UI
   const [showingDamage, setShowingDamage] = useState<{ amount: number; type: 'damage' | 'heal'; position: { x: number; y: number } } | null>(null);
   const [matchDuration, setMatchDuration] = useState(0);
@@ -96,6 +107,13 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
   });
   
   const { isListening, transcript, confidence, loudness, hasPermission, isSupported } = voiceRecognition;
+
+  // FIX: Auto-start voice recognition on match start
+  useEffect(() => {
+    if (gameState === 'active' && voiceRecognition.autoStartListening) {
+      voiceRecognition.autoStartListening();
+    }
+  }, [gameState, voiceRecognition.autoStartListening]);
 
   // Initialize systems
   useEffect(() => {
@@ -245,29 +263,38 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
       healPlayer('player1', castData.healing);
     }
     
-    // Visual and audio feedback
+    // NEW: Visual and audio feedback with caster visuals
     if (spell) {
       soundManager.playCast(spell.element, loudness);
       
-      if (vfxManagerRef.current) {
-        // Cast sigil at player position
-        vfxManagerRef.current.createCastSigil({
-          element: spell.element,
-          position: { x: 200, y: 400 },
-          power
-        });
-        
-        // Projectile to opponent (if damage spell)
-        if (castData.damage > 0) {
-          setTimeout(() => {
-            vfxManagerRef.current.createProjectile({
-              element: spell.element,
-              position: { x: 200, y: 400 },
-              target: { x: 600, y: 200 },
-              power
-            });
-          }, 400);
-        }
+      // Show casting animation
+      setActiveCasts(prev => ({
+        ...prev,
+        player1: { element: spell.element, timestamp: now }
+      }));
+      
+      // Clear casting animation after 600ms
+      setTimeout(() => {
+        setActiveCasts(prev => ({ ...prev, player1: undefined }));
+      }, 600);
+      
+      // Create projectile for damage spells
+      if (castData.damage > 0) {
+        setTimeout(() => {
+          const projectileId = projectileIdRef.current++;
+          setActiveProjectiles(prev => [...prev, {
+            id: projectileId,
+            element: spell.element,
+            from: { x: 200, y: 400 },
+            to: { x: 600, y: 200 },
+            power,
+            onComplete: () => {
+              setActiveProjectiles(prev => prev.filter(p => p.id !== projectileId));
+              // Screen shake and impact sound
+              soundManager.playImpact(spell.element);
+            }
+          }]);
+        }, 400);
       }
     }
     
@@ -331,26 +358,35 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
       healPlayer('player2', healing);
     }
     
-    // Audio and visual feedback
+    // NEW: Audio and visual feedback for opponent
     soundManager.playCast(spell.element, castData.loudness || 0.8);
     
-    if (vfxManagerRef.current) {
-      vfxManagerRef.current.createCastSigil({
-        element: spell.element,
-        position: { x: 600, y: 200 },
-        power: castData.power
-      });
-      
-      if (damage > 0) {
-        setTimeout(() => {
-          vfxManagerRef.current.createProjectile({
-            element: spell.element,
-            position: { x: 600, y: 200 },
-            target: { x: 200, y: 400 },
-            power: castData.power
-          });
-        }, 400);
-      }
+    // Show opponent casting animation
+    setActiveCasts(prev => ({
+      ...prev,
+      player2: { element: spell.element, timestamp: castData.ts }
+    }));
+    
+    // Clear casting animation after 600ms
+    setTimeout(() => {
+      setActiveCasts(prev => ({ ...prev, player2: undefined }));
+    }, 600);
+    
+    if (damage > 0) {
+      setTimeout(() => {
+        const projectileId = projectileIdRef.current++;
+        setActiveProjectiles(prev => [...prev, {
+          id: projectileId,
+          element: spell.element,
+          from: { x: 600, y: 200 },
+          to: { x: 200, y: 400 },
+          power: castData.power,
+          onComplete: () => {
+            setActiveProjectiles(prev => prev.filter(p => p.id !== projectileId));
+            soundManager.playImpact(spell.element);
+          }
+        }]);
+      }, 400);
     }
     
     // Show damage numbers
@@ -464,10 +500,47 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-primary/20 via-background to-secondary/20 relative overflow-hidden">
+      {/* NEW: Caster Visuals */}
+      <div className="absolute inset-0 z-10 pointer-events-none">
+        {/* Player 1 (Left) */}
+        <div className="absolute bottom-16 left-16">
+          <Caster
+            position="left"
+            element={activeCasts.player1?.element}
+            isCasting={!!activeCasts.player1}
+            hp={player1.hp}
+            maxHp={player1.maxHp}
+          />
+        </div>
+        
+        {/* Player 2 (Right) */}
+        <div className="absolute top-16 right-16">
+          <Caster
+            position="right"
+            element={activeCasts.player2?.element}
+            isCasting={!!activeCasts.player2}
+            hp={player2.hp}
+            maxHp={player2.maxHp}
+          />
+        </div>
+        
+        {/* Active Projectiles */}
+        {activeProjectiles.map(projectile => (
+          <Projectile
+            key={projectile.id}
+            element={projectile.element}
+            from={projectile.from}
+            to={projectile.to}
+            power={projectile.power}
+            onComplete={projectile.onComplete}
+          />
+        ))}
+      </div>
+      
       {/* VFX Canvas */}
       <canvas
         ref={vfxCanvasRef}
-        className="absolute inset-0 pointer-events-none z-10"
+        className="absolute inset-0 pointer-events-none z-5"
         style={{ width: '100%', height: '100%' }}
       />
       

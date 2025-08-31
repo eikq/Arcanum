@@ -58,6 +58,11 @@ export const Practice = ({ onBack, isIPSafe }: PracticeProps) => {
 
   const voiceState = useVoiceRecognition(handleVoiceResult, false);
 
+  // FIX: Auto-start mic detection and SR on mount
+  useEffect(() => {
+    voiceState.autoStartListening?.();
+  }, [voiceState.autoStartListening]);
+
   // Filter spells based on selection
   const filteredSpells = SPELL_DATABASE.filter(spell => {
     if (selectedElement !== 'all' && spell.element !== selectedElement) return false;

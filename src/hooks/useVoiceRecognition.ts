@@ -6,6 +6,7 @@ interface VoiceRecognitionHook extends VoiceRecognitionState {
   stopListening: () => void;
   toggle: () => void;
   resetTranscript: () => void;
+  autoStartListening?: () => Promise<void>; // NEW: added to interface
 }
 
 export const useVoiceRecognition = (
@@ -53,16 +54,25 @@ export const useVoiceRecognition = (
       recognition.onend = () => {
         setState(prev => ({ ...prev, isListening: false }));
         
-        // Auto-restart with exponential backoff (max 5s)
+        // FIX: Auto-restart with capped backoff
         if (state.isListening) {
-          const delay = Math.min(1000 * Math.pow(2, Math.random()), 5000);
-          restartTimeoutRef.current = setTimeout(() => {
-            try {
-              recognition.start();
-            } catch (error) {
-              console.warn('Failed to restart speech recognition:', error);
-            }
-          }, delay);
+          let backoff = 500;
+          const maxBackoff = 5000;
+          const restartSR = () => {
+            if (restartTimeoutRef.current) clearTimeout(restartTimeoutRef.current);
+            restartTimeoutRef.current = setTimeout(() => {
+              try {
+                if (recognitionRef.current && state.isListening) {
+                  recognitionRef.current.start();
+                }
+              } catch (error) {
+                console.warn('Failed to restart SR:', error);
+                backoff = Math.min(maxBackoff, backoff + 250);
+                restartSR();
+              }
+            }, backoff);
+          };
+          restartSR();
         }
       };
 
@@ -94,6 +104,10 @@ export const useVoiceRecognition = (
           const confidence = lastResult[0].confidence;
           const now = Date.now();
 
+          // FIX: RMS gate + debounce
+          const rms = state.loudness;
+          if (rms < 0.08) return; // Require minimum volume
+          
           // Debounce identical transcripts within 500ms
           if (transcript === lastTranscriptRef.current && 
               now - lastResultTimeRef.current < 500) {
@@ -127,27 +141,50 @@ export const useVoiceRecognition = (
     };
   }, [hotwordEnabled, hotword, onResult, state.isListening, state.loudness]);
 
-  // Initialize audio context for loudness detection
+  // FIX: Auto mic detection + init
   const initializeAudioContext = useCallback(async () => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        audio: { 
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: false
+        } 
+      });
       
       audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
       analyserRef.current = audioContextRef.current.createAnalyser();
       microphoneRef.current = audioContextRef.current.createMediaStreamSource(stream);
       
       microphoneRef.current.connect(analyserRef.current);
-      analyserRef.current.fftSize = 256;
+      analyserRef.current.fftSize = 512;
       
       setState(prev => ({ ...prev, hasPermission: true }));
       
-      // Start loudness monitoring
+      // Start loudness monitoring immediately
       monitorLoudness();
     } catch (error) {
       console.error('Failed to initialize audio context:', error);
       setState(prev => ({ ...prev, hasPermission: false }));
     }
   }, []);
+
+  // FIX: Auto-start on mount for Practice/Match scenes
+  const autoStartListening = useCallback(async () => {
+    if (!state.hasPermission) {
+      await initializeAudioContext();
+    }
+    // Auto-start SR after mic permission
+    setTimeout(() => {
+      if (recognitionRef.current && state.hasPermission && !state.isListening) {
+        try {
+          recognitionRef.current.start();
+        } catch (error) {
+          console.warn('Auto-start failed:', error);
+        }
+      }
+    }, 500);
+  }, [state.hasPermission, state.isListening, initializeAudioContext]);
 
   // Monitor microphone loudness
   const monitorLoudness = useCallback(() => {
@@ -224,6 +261,7 @@ export const useVoiceRecognition = (
     startListening,
     stopListening,
     toggle,
-    resetTranscript
+    resetTranscript,
+    autoStartListening // NEW: expose auto-start for Practice/Match
   };
 };

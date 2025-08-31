@@ -4,6 +4,7 @@ import { Practice } from './Practice';
 import { Settings } from './Settings';
 import { HowToPlay } from './HowToPlay';
 import { PlayMenu } from './PlayMenu';
+import { Match } from './Match';
 import { GameSettings } from '@/types/game';
 
 // Default game settings
@@ -62,12 +63,17 @@ export const GameEngine = () => {
           />
         );
         
-      case 'play':
+      case 'play-menu':
         return (
           <PlayMenu 
             onBack={() => handleNavigate('main-menu')}
             onStartMatch={(mode, data) => {
-              // Handle match start
+              // NEW: Route to Match component
+              if (mode === 'bot') {
+                setCurrentScreen(`match:bot:${data?.difficulty || 'medium'}`);
+              } else {
+                setCurrentScreen(`match:${mode}`);
+              }
               console.log('Starting match:', mode, data);
             }}
           />
@@ -90,6 +96,19 @@ export const GameEngine = () => {
         );
         
       default:
+        // NEW: Handle match screens
+        if (currentScreen.startsWith('match:')) {
+          const [, mode, difficulty] = currentScreen.split(':');
+          return (
+            <Match
+              mode={mode as 'quick' | 'bot' | 'code'}
+              settings={gameSettings}
+              onBack={() => handleNavigate('main-menu')}
+              botDifficulty={difficulty as 'easy' | 'medium' | 'hard'}
+            />
+          );
+        }
+        
         return <MainMenu onNavigate={handleNavigate} />;
     }
   };
