@@ -67,6 +67,8 @@ export const useVoiceRecognition = (
   const restartTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const micStateUnsubscribeRef = useRef<(() => void) | null>(null);
   const isStartingRef = useRef(false);
+  const shouldBeListeningRef = useRef(false);
+  const lastResultTimeRef = useRef(0);
 
   // Initialize speech recognition
   useEffect(() => {
@@ -88,33 +90,38 @@ export const useVoiceRecognition = (
 
       // Speech recognition event handlers
       recognition.onstart = () => {
+        console.log('Speech recognition started');
         setListening(true);
         setError(undefined);
         isStartingRef.current = false;
       };
 
       recognition.onend = () => {
+        console.log('Speech recognition ended');
         setListening(false);
         isStartingRef.current = false;
         
-        // Auto-restart if we should still be listening
-        if (hasPermission && !micDenied && !isStartingRef.current) {
+        // Only auto-restart if we should still be listening and it's been more than 100ms since last result
+        const timeSinceLastResult = Date.now() - lastResultTimeRef.current;
+        if (shouldBeListeningRef.current && timeSinceLastResult > 100 && !isStartingRef.current) {
+          console.log('Auto-restarting speech recognition...');
           if (restartTimeoutRef.current) clearTimeout(restartTimeoutRef.current);
           restartTimeoutRef.current = setTimeout(async () => {
-            if (recognitionRef.current && !listening && !isStartingRef.current) {
+            if (shouldBeListeningRef.current && !isStartingRef.current && recognitionRef.current) {
               try {
                 isStartingRef.current = true;
-                await recognition.start();
+                recognitionRef.current.start();
               } catch (error) {
                 console.warn('Auto-restart failed:', error);
                 isStartingRef.current = false;
               }
             }
-          }, 500);
+          }, 200);
         }
       };
 
       recognition.onerror = (event) => {
+        console.log('Speech recognition error:', event.error);
         isStartingRef.current = false;
         
         if (event.error === 'not-allowed') {
@@ -122,16 +129,21 @@ export const useVoiceRecognition = (
           setListening(false);
           setMicDenied(true);
           setError('Microphone permission denied');
+          shouldBeListeningRef.current = false;
+        } else if (event.error === 'no-speech') {
+          // This is normal, don't treat as error
+          console.log('No speech detected, continuing...');
+        } else if (event.error === 'aborted') {
+          // Manual stop, don't restart
+          shouldBeListeningRef.current = false;
         } else {
-          // Only show errors for serious issues
-          if (event.error !== 'no-speech' && event.error !== 'aborted' && event.error !== 'network') {
-            console.warn('Speech recognition error:', event.error);
-            setError(`Speech recognition error: ${event.error}`);
-          }
+          console.warn('Speech recognition error:', event.error);
+          // Don't set error state for common issues, just log them
         }
       };
 
       recognition.onresult = (event) => {
+        lastResultTimeRef.current = Date.now();
         const results = event.results;
         let interimTranscript = '';
         let finalTranscript = '';
@@ -145,12 +157,18 @@ export const useVoiceRecognition = (
             const confidence = result[0].confidence || 0.9;
             finalTranscript = transcript;
             
+            console.log('Final transcript:', transcript, 'confidence:', confidence);
+            
             // Update final transcript
             setFinal(transcript);
             setTranscript(transcript);
             setConfidence(confidence);
+            
+            // Call callbacks with proper parameters
             if (onFinalCallback) {
-              onFinalCallback(transcript);
+              const currentRms = micStateRef.current?.rms || 0;
+              const currentDbfs = micStateRef.current?.dbfs || -60;
+              onFinalCallback(transcript, currentRms, currentDbfs);
             }
             if (onResult) {
               onResult(transcript, confidence, loudness);
@@ -167,7 +185,9 @@ export const useVoiceRecognition = (
         if (interimTranscript) {
           setInterim(interimTranscript);
           if (onInterimCallback) {
-            onInterimCallback(interimTranscript);
+            const currentRms = micStateRef.current?.rms || 0;
+            const currentDbfs = micStateRef.current?.dbfs || -60;
+            onInterimCallback(interimTranscript, currentRms, currentDbfs);
           }
         }
       };
@@ -181,7 +201,7 @@ export const useVoiceRecognition = (
         clearTimeout(restartTimeoutRef.current);
       }
     };
-  }, [hasPermission, micDenied, onInterimCallback, onFinalCallback, onResult, loudness]);
+  }, [onInterimCallback, onFinalCallback, onResult, loudness]);
 
   // Subscribe to mic state changes
   useEffect(() => {
@@ -189,6 +209,15 @@ export const useVoiceRecognition = (
       micStateRef.current = micState;
       setDbfs(micState.dbfs);
       setLoudness(micState.rms);
+      
+      // Update permission state based on mic state
+      if (micState.ready === 'ready') {
+        setHasPermission(true);
+        setMicDenied(false);
+      } else if (micState.ready === 'error') {
+        setHasPermission(false);
+        setMicDenied(true);
+      }
     });
 
     micStateUnsubscribeRef.current = unsubscribe;
@@ -196,11 +225,13 @@ export const useVoiceRecognition = (
     return () => {
       unsubscribe();
     };
-  }, [listening, hasPermission]);
+  }, []);
 
   // Prime microphone
   const primeMic = useCallback(async (deviceId?: string): Promise<MediaStream> => {
     try {
+      console.log('Priming microphone...');
+      
       // Check for secure origin
       const isSecure = location.protocol === 'https:' || location.hostname === 'localhost';
       if (!isSecure) {
@@ -213,6 +244,7 @@ export const useVoiceRecognition = (
         setHasPermission(true);
         setMicDenied(false);
         setError(undefined);
+        console.log('Microphone primed successfully');
         return micState.stream;
       } else {
         throw new Error('Failed to acquire microphone stream');
@@ -235,11 +267,20 @@ export const useVoiceRecognition = (
     
     // Don't start if already listening or starting
     if (listening || isStartingRef.current) {
+      console.log('Already listening or starting, skipping...');
       return;
     }
     
+    console.log('Starting speech recognition...');
+    shouldBeListeningRef.current = true;
+    
     if (!hasPermission) {
-      await primeMic();
+      try {
+        await primeMic();
+      } catch (error) {
+        console.error('Failed to prime mic before starting:', error);
+        return;
+      }
     }
     
     try {
@@ -253,10 +294,12 @@ export const useVoiceRecognition = (
         setError(error.message);
       }
     }
-  }, [hasPermission, primeMic]);
+  }, [hasPermission, primeMic, listening]);
 
   // Stop listening
   const stop = useCallback(() => {
+    console.log('Stopping speech recognition...');
+    shouldBeListeningRef.current = false;
     isStartingRef.current = false;
     setListening(false);
     
@@ -275,10 +318,19 @@ export const useVoiceRecognition = (
     }
   }, []);
 
-  // Restart with exponential backoff
+  // Restart with proper cleanup
   const restart = useCallback(async () => {
+    console.log('Restarting speech recognition...');
     stop();
-    await new Promise(resolve => setTimeout(resolve, 1000));
+    
+    // Wait a bit longer for cleanup
+    await new Promise(resolve => setTimeout(resolve, 500));
+    
+    // Reset state
+    setError(undefined);
+    setInterim('');
+    setFinal('');
+    
     await start();
   }, [start, stop]);
 
@@ -287,14 +339,31 @@ export const useVoiceRecognition = (
     return micStateRef.current?.rms ?? 0;
   }, []);
 
+  // Reset function to clear all state
+  const resetTranscript = useCallback(() => {
+    setTranscript('');
+    setFinal('');
+    setInterim('');
+    setConfidence(0);
+    lastResultTimeRef.current = 0;
+  }, []);
+
   // Cleanup on unmount
   useEffect(() => {
     return () => {
+      shouldBeListeningRef.current = false;
       if (restartTimeoutRef.current) {
         clearTimeout(restartTimeoutRef.current);
       }
       if (micStateUnsubscribeRef.current) {
         micStateUnsubscribeRef.current();
+      }
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.stop();
+        } catch (error) {
+          // Ignore cleanup errors
+        }
       }
     };
   }, []);
@@ -307,13 +376,6 @@ export const useVoiceRecognition = (
       start();
     }
   }, [listening, start, stop]);
-
-  const resetTranscript = useCallback(() => {
-    setTranscript('');
-    setFinal('');
-    setInterim('');
-    setConfidence(0);
-  }, []);
 
   const autoStartListening = useCallback(async () => {
     if (!hasPermission) {
