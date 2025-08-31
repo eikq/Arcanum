@@ -215,6 +215,7 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
       voiceChat.disconnect();
       soundManager.stopMusic();
     };
+  }, [mode, botDifficulty, settings]);
 
   // Start countdown
   const startCountdown = useCallback(() => {
@@ -267,6 +268,7 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
     soundManager.music.start('battle_theme');
     
     // Start match timer
+  }, [mode, voiceRecognition, handleOpponentCast]);
 
   // Match timer effect
   useEffect(() => {
@@ -519,7 +521,6 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
     setShowEndModal(false);
     setTotalDamageDealt(0);
     setTotalDamageTaken(0);
-    resetCastHistory();
     startCountdown();
   }, [mode, startCountdown]);
 
@@ -539,7 +540,6 @@ export const Match = ({ mode, settings, onBack, botDifficulty = 'medium', roomId
     setShowEndModal(false);
     setTotalDamageDealt(0);
     setTotalDamageTaken(0);
-    resetCastHistory();
     
     // Create new bot
     if (botOpponentRef.current) {
