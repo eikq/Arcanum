@@ -196,3 +196,136 @@ npm run preview  # พรีวิวไฟล์บิลด์
 - AI/ASR/DB: `server.cjs` + `supabase/`  
 - ข้อเสีย/ช่องโหว่: ไม่มีโฟนีมสกอร์, แพ้เสียงรบกวน, iOS ต้องกดเริ่มฟังเอง, CORS/ไมค์/Latency  
 - บั๊กที่พบบ่อย: รอบแรกนิ่ง, ฟังหยุดไว, ไม่โชว์ transcript, ปุ่มเมนูขาด, เอฟเฟกต์สะดุด, สเกลความดังเพี้ยน, deny ไมค์แล้วค้าง
+
+
+# ภาคผนวก — ทำให้ “ระบบเกมดีขึ้น & จับเสียงแม่นขึ้น” (Actionable Playbook)
+
+> ใช้เอกสารนี้เป็น “เช็กลิสต์ลงมือทำ” เพิ่มเข้าไปใน README หลักของ Arcanum
+
+---
+
+## A) ปรับ UX/เกมเพลย์ (ผลลัพธ์ชัด เร็ว ลงแรงน้อย)
+1) **Hold‑to‑Cast**: ให้ผู้เล่นกดค้างเพื่อพูด → ลดเสียงรบกวนตอนยังไม่พูด
+2) **Mic Calibration 20 วิ**: ก่อนเล่นครั้งแรก ให้ผู้ใช้
+   - เงียบ 5 วิ → วัด “ระดับเสียงพื้นฐาน” (noise floor)
+   - พูดปกติ 5 วิ → วัด “ระดับเสียงเป้าหมาย” (speech level)
+   - ตะโกน/พูดดัง 3 วิ → ตั้ง “เพดานไม่ให้ peak แตก”
+   - คำนวณ `gate`, `auto gain`, `timeout` จากค่าจริงของผู้ใช้ (เก็บลง `localStorage`)
+3) **Tutorial 60 วิ**: เล่นเสียงตัวอย่าง → ผู้ใช้พูดตาม 3 ครั้ง (ง่าย→ยาก) + ให้คำแนะนำเฉพาะจุด
+4) **Slow Practice Mode**: ยืด time‑window, ปิดคูลดาวน์, เปิด transcript + confidence เต็ม
+5) **Feedback ที่เข้าใจง่าย**: โชว์ “คำที่ได้ยินจริง” + แถบความมั่นใจ + Hint สั้น ๆ (เช่น */θ/ vs /t/*)
+6) **Back to Menu / Retry เร็ว**: หลังแพ้/ชนะ ให้รีเซ็ตสถานะได้ใน 1 คลิก
+7) **Preload เอฟเฟกต์เสียง/ภาพ**: ลดอาการ “เล่นไม่ติด” ครั้งแรก
+
+---
+
+## B) ปรับท่อเสียง (Audio Pipeline) ให้สะอาดขึ้น
+- **WebAudio + Analyser**: คำนวณ RMS/peak แบบเรียลไทม์ → ใช้เป็น VAD (voice activity detection) ง่าย ๆ
+- **Noise Gate & AGC เบา ๆ**: ตัดเสียงต่ำกว่าเกณฑ์ และปรับเกนเล็กน้อยให้คงที่
+- **HPF 100–150 Hz**: ตัดฮัม/ลม → ช่วยให้ ASR อ่านพยัญชนะชัดขึ้น
+- **Sample Rate 16 kHz/24 kHz** (ถ้าใช้โมเดลที่คาดหวัง SR คงที่) เพื่อหลีกเลี่ยง resample คุณภาพต่ำฝั่งเบราว์เซอร์
+- **Chunk ขนาด 0.5–1.0 s**: สำหรับโหมดสตรีมไปเซิร์ฟเวอร์ ลด latency โดยยังคุมโหลดได้
+
+**โค้ดตั้งต้น (pseudo‑TS):**
+```ts
+async function calibrateMic() {
+  const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  const ctx = new AudioContext();
+  const src = ctx.createMediaStreamSource(stream);
+  const analyser = ctx.createAnalyser();
+  analyser.fftSize = 2048; // ความละเอียดพอใช้
+  src.connect(analyser);
+
+  function rms() {/* อ่าน PCM จาก analyser แล้วคำนวณค่า RMS */}
+
+  const noiseFloor = await sampleRMS(5_000);  // เงียบ 5 วิ
+  const speechLvl  = await sampleRMS(5_000);  // พูดปกติ 5 วิ
+  const peakLvl    = await samplePeak(3_000); // ดัง 3 วิ
+
+  const gate = (noiseFloor * 1.5);
+  const autoGain = Math.min(1.0, (0.7 / speechLvl)); // ดันให้ถึง ~70%
+  const timeoutMs = 1200; // ไม่มีเสียงตลอด 1.2s → ตัดจบ
+
+  localStorage.setItem("micProfile", JSON.stringify({ gate, autoGain, timeoutMs }));
+}
+```
+
+---
+
+## C) กลยุทธ์ ASR (จับเสียง) แบบ “เลือกได้ตามทรัพยากร”
+1) **Web Speech API (ง่ายสุด)**  
+   - ข้อดี: ไม่ต้องตั้งเซิร์ฟเวอร์, เริ่มเร็ว  
+   - ข้อเสีย: ควบคุมยาก, ไม่มีโฟนีม, คุณภาพขึ้นกับเบราว์เซอร์/อุปกรณ์
+2) **ASR ฝั่งเซิร์ฟเวอร์ (คุณภาพสูงกว่า)** เช่น Whisper/ผู้ให้บริการเชิงพาณิชย์  
+   - ข้อดี: ควบคุมได้, ทำสกอร์เสียงเชิงลึก/โฟนีมได้, สร้างพจนานุกรม/เดโมน้อยได้  
+   - ข้อเสีย: มีดีเลย์/ค่าใช้จ่าย, ต้องดูแลโควตา/เสถียรภาพ
+3) **On‑device WASM (ขั้นสูง)** เช่น whisper.cpp  
+   - ข้อดี: ส่วนตัว/ออฟไลน์บางส่วน  
+   - ข้อเสีย: หนักเครื่อง, ต้องจัดการ performance
+
+**สวิตช์ใน `.env` (ตัวอย่าง):**
+```ini
+ASR_PROVIDER=web          # web | whisper | vendorX
+```
+
+---
+
+## D) ให้คะแนน/ตรวจคำแบบทนทาน (Robust Scoring)
+- **Normalize**: lower‑case, ตัดเว้นวรรค/สัญลักษณ์, map คำเทียบ (เช่น wanna → want to)
+- **Levenshtein + Confidence**: ใช้ค่าต่ำสุดระหว่าง “ความคล้ายข้อความ” กับ “confidence” จาก ASR
+- **Minimum‑Pair Focus**: ชุดคำที่แยกเสียงยาก (think/sink, tree/three, light/right) เพื่อฝึกเป้าเฉพาะจุด
+- **Phoneme‑aware (ขั้นสูง)**: แปลงคำเป้าเป็น IPA แล้วเปรียบเทียบเป็นหน่วยเสียง (ถ้าโมเดล/บริการรองรับ)
+- **Time Window Penalty**: พูดช้า/ช้าเกินเวลาที่กำหนด → ลดคะแนน 5–15%
+- **Noise Penalty**: RMS พื้นหลังสูงผิดปกติในช่วงพูด → ลดคะแนน/เตือนผู้ใช้ย้ายที่/ใส่หูฟังไมค์
+
+**ตัวอย่างโค้ด (pseudo‑TS):**
+```ts
+const s = similarity( normalize(target), normalize(heard) );
+const base = Math.min(confidence, s);
+let grade = base >= 0.90 ? "Perfect" : base >= 0.75 ? "Good" : base >= 0.60 ? "Okay" : "Miss";
+if (spokeLate) grade = downgrade(grade); // ลดระดับถ้าช้ากว่า time window
+if (noisy) grade = downgrade(grade);     // ลดระดับถ้าเสียงรบกวนสูง
+```
+
+---
+
+## E) เกมดีขึ้นด้วย “สมดุล + เทเลเมทรี + A/B Test”
+- **สมดุล (Balance):** ปรับ `baseDamage`, ตัวคูณคอมโบ, คูลดาวน์ จากข้อมูลการเล่นจริง
+- **เทเลเมทรี (Instrumentation):** เก็บ `WER/CER`, ค่า confidence, latency, อัตราชนะ/แพ้, คำที่พลาดบ่อย
+- **A/B Test:** ทดลอง 2–3 เซ็ต threshold/คะแนน แล้วดูผลชนะ/ความพึงพอใจผู้เล่น
+- **ตั้งเป้าเชิงตัวเลข:** WER < 20% ในชุดคำพื้นฐาน, Median latency < 400 ms ในโหมดสตรีม
+
+---
+
+## F) เสถียรภาพ & ประสิทธิภาพ
+- **Worker/Off‑main‑thread** สำหรับประมวลผลหนัก (เช่น Levenshtein หลายคำพร้อมกัน)
+- **Prewarm AudioContext** หลัง user gesture เพื่อลดดีเลย์เริ่มฟังบนมือถือ
+- **Retry/Backoff** ฝั่ง API + จัดการ offline/timeout ให้ครบ
+- **Cache คำ/เสียงตัวอย่าง** ด้วย Cache Storage
+
+---
+
+## G) ความเป็นส่วนตัว/จริยธรรม
+- ปุ่ม **ไม่บันทึกเสียง** (opt‑out), เก็บเฉพาะสถิติที่จำเป็น, ลบข้อมูลได้
+- แจ้งชัดเจนเมื่อส่งเสียงไปประมวลผลที่เซิร์ฟเวอร์/บุคคลที่สาม
+- เข้ารหัสระหว่างทาง (HTTPS) และจำกัดสิทธิ์คีย์/ฐานข้อมูล
+
+---
+
+## H) แผนทดสอบคุณภาพ (QA) แบบรวบรัด
+1) **ชุดทดสอบ 50–200 ตัวอย่าง** ครอบคลุม: เพศ/อายุ/สำเนียง/ไมค์/สภาพห้อง
+2) **เมตริกหลัก**: WER/CER, latency (P50/P90), อัตรา Miss/False Positive, retention, fun score
+3) **บั๊กเช็กลิสต์**: เริ่มรอบแรก, ปุ่มเมนู, transcript เต็ม, คูลดาวน์, เอฟเฟกต์, deny‑mic แล้วไม่ค้าง
+4) **รายงานประจำสัปดาห์**: กราฟเทรนด์ + ข้อเสนอปรับค่า threshold/คะแนน/UX
+
+---
+
+## I) บล็อกโค้ดที่ควรมี (ตัวอย่างไฟล์)
+- `src/lib/recognition.ts`: start/stop, VAD/gate, timeout, ส่งชังก์ → `/api/transcribe` (ถ้าโหมดเซิร์ฟเวอร์)
+- `src/lib/scoring.ts`: normalize + similarity + ผูกกับเกณฑ์เกรด/ดาเมจ
+- `src/game/logic.ts`: คูณดาเมจตามเกรด + คอมโบ + ธาตุ
+- `src/config/spells.ts`: รายการคำ/คาถา + hint + sampleAudio
+- `server.cjs`: endpoint `/api/transcribe`, `/api/score`, CORS/limit/logging
+
+> นำทั้งไฟล์นี้ไปแปะเพิ่มท้าย README ได้เลย หรือค่อยๆ ยกไปใส่ในหมวด “Gameplay / Tech / Roadmap” ตามเหมาะสม
+
